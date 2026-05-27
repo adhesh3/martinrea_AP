@@ -1,0 +1,146 @@
+-- ────────────────────────────────────────────────────────────────────
+-- ⚠️  DRAFT — DO NOT RUN WITHOUT ROSHNI'S SIGNOFF ⚠️
+-- ────────────────────────────────────────────────────────────────────
+--
+-- Owner: Manav (Integration Engineer) + Roshni (Data) — joint
+-- Purpose: Bridge the integrations-module tables (V1–V6) to Roshni's
+-- data-module tables (DAT-01: users, invoices, approval_rules,
+-- audit_logs) via foreign-key constraints, so referential integrity
+-- holds across the two modules.
+--
+-- Prerequisites (ALL must be satisfied before this migration can run):
+--   1. Roshni's DAT-01 migration has executed (invoices, users tables exist)
+--   2. V1__create_suppliers.sql has executed (suppliers table exists)
+--   3. V2__create_purchase_orders.sql has executed (purchase_orders exists)
+--   4. The design decisions in the "Open design decisions" block below
+--      have been resolved by Roshni and reviewed by the PM/tech lead
+--   5. Any existing rows in invoices with a non-null supplier_id /
+--      po_number have been validated to reference real rows in
+--      suppliers / purchase_orders (otherwise the FK creation will
+--      fail on orphan rows — run the data-cleanup helper queries at
+--      the bottom of this file first)
+--
+-- ────────────────────────────────────────────────────────────────────
+-- Open design decisions (Roshni must pick one option for each FK)
+-- ────────────────────────────────────────────────────────────────────
+--
+-- DECISION 1 — invoices.supplier_id target
+--
+--   Option 1A:  FK to suppliers.id  (UUID)
+--     PROS:  consistent with the UUID-everywhere pattern in DAT-01
+--     CONS:  requires Roshni to ALTER invoices.supplier_id from
+--            VARCHAR(50) → UUID (her schema change, not ours), and to
+--            backfill existing rows by joining on supplier_code
+--
+--   Option 1B:  FK to suppliers.supplier_code  (VARCHAR(64))
+--     PROS:  no column type change on invoices
+--     CONS:  supplier_code is only unique within (supplier_code,
+--            instance_id) — a single-column FK breaks multi-tenant
+--            uniqueness. Would require adding instance_id to invoices
+--            AND switching to a composite FK
+--
+-- DECISION 2 — invoices.po_number target
+--
+--   Option 2A:  FK to purchase_orders.id  (UUID)
+--     PROS:  clean single-column uniqueness
+--     CONS:  Roshni must add a purchase_order_id UUID column to
+--            invoices and backfill it from po_number + instance_id
+--
+--   Option 2B:  Composite FK to purchase_orders(po_number, instance_id)
+--     PROS:  keeps po_number as a human-readable string on invoices
+--     CONS:  requires Roshni to add instance_id to invoices
+--
+-- ────────────────────────────────────────────────────────────────────
+-- Recommendation (Manav)
+-- ────────────────────────────────────────────────────────────────────
+-- Option 1A + 2A: align both modules on UUIDs. One-time backfill cost
+-- on Roshni's side, but afterwards both modules speak the same identifier
+-- language and downstream code (matching engine, reporting) doesn't
+-- have to juggle two representations of "this is supplier X".
+--
+-- ────────────────────────────────────────────────────────────────────
+-- The actual ALTER statements are intentionally left as commented-out
+-- templates below so this file cannot be executed accidentally. Roshni:
+-- pick a strategy, uncomment the appropriate block, and re-PR for review.
+-- ────────────────────────────────────────────────────────────────────
+
+BEGIN;
+
+-- ────────────────────────────────────────────────────────────────────
+-- TEMPLATE — Option 1A: FK invoices.supplier_uuid → suppliers.id
+-- ────────────────────────────────────────────────────────────────────
+-- Roshni runs FIRST (on her side):
+--   ALTER TABLE invoices ADD COLUMN supplier_uuid UUID;
+--   UPDATE invoices i
+--     SET supplier_uuid = (
+--       SELECT s.id FROM suppliers s
+--       WHERE s.supplier_code = i.supplier_id
+--       LIMIT 1
+--     );
+-- Then this migration (V7):
+--
+-- ALTER TABLE invoices
+--   ADD CONSTRAINT fk_invoices_supplier
+--   FOREIGN KEY (supplier_uuid) REFERENCES suppliers(id)
+--   ON DELETE SET NULL;
+--
+-- CREATE INDEX IF NOT EXISTS idx_invoices_supplier_uuid
+--   ON invoices (supplier_uuid)
+--   WHERE supplier_uuid IS NOT NULL;
+
+-- ────────────────────────────────────────────────────────────────────
+-- TEMPLATE — Option 2A: FK invoices.purchase_order_id → purchase_orders.id
+-- ────────────────────────────────────────────────────────────────────
+-- Roshni runs FIRST:
+--   ALTER TABLE invoices ADD COLUMN purchase_order_id UUID;
+--   UPDATE invoices i
+--     SET purchase_order_id = (
+--       SELECT po.id FROM purchase_orders po
+--       WHERE po.po_number = i.po_number
+--       -- Add po.instance_id = i.instance_id once invoices.instance_id exists
+--       LIMIT 1
+--     );
+-- Then this migration (V7):
+--
+-- ALTER TABLE invoices
+--   ADD CONSTRAINT fk_invoices_purchase_order
+--   FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id)
+--   ON DELETE SET NULL;
+--
+-- CREATE INDEX IF NOT EXISTS idx_invoices_purchase_order_id
+--   ON invoices (purchase_order_id)
+--   WHERE purchase_order_id IS NOT NULL;
+
+-- ────────────────────────────────────────────────────────────────────
+-- (Templates for Option 1B / 2B intentionally omitted — see decisions
+-- block at top. Add them here only if Roshni picks those paths.)
+-- ────────────────────────────────────────────────────────────────────
+
+COMMIT;
+
+-- ────────────────────────────────────────────────────────────────────
+-- DATA-CLEANUP HELPER QUERIES (run before V7 in any environment with
+-- pre-existing invoices to catch orphan rows that would block the FK)
+-- ────────────────────────────────────────────────────────────────────
+-- -- Orphan invoices.supplier_id with no matching supplier (any instance):
+-- SELECT id, supplier_id
+--   FROM invoices
+--  WHERE supplier_id IS NOT NULL
+--    AND NOT EXISTS (
+--      SELECT 1 FROM suppliers s
+--       WHERE s.supplier_code = invoices.supplier_id
+--    );
+--
+-- -- Orphan invoices.po_number with no matching PO (any instance):
+-- SELECT id, po_number
+--   FROM invoices
+--  WHERE po_number IS NOT NULL
+--    AND NOT EXISTS (
+--      SELECT 1 FROM purchase_orders po
+--       WHERE po.po_number = invoices.po_number
+--    );
+--
+-- Resolve these by either:
+--   (a) NULLing the offending column (clean break, audit-loggable), or
+--   (b) Triggering a fresh Epicor sync that creates the missing parent rows
+-- BEFORE running the actual ALTER TABLE statements above.

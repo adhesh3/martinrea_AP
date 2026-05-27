@@ -1,0 +1,47 @@
+{
+  "name": "martinrea-ap-integrations",
+  "version": "0.1.0",
+  "description": "External Integrations module for the Martinrea AP Automation Platform — Epicor sync (INT-01/02), live goods-receipts API (INT-03), and Mexico CFDI validation (INT-04).",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "node dist/main.js",
+    "start:dev": "nodemon",
+    "build": "tsc",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "seed": "ts-node -r dotenv/config src/integrations/seeds/dev-sample-data.seed.ts"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.4.0",
+    "@nestjs/config": "^3.2.0",
+    "@nestjs/core": "^10.4.0",
+    "@nestjs/platform-express": "^10.4.0",
+    "@nestjs/schedule": "^4.1.0",
+    "@nestjs/swagger": "^7.4.0",
+    "@nestjs/terminus": "^10.2.0",
+    "@nestjs/typeorm": "^10.0.0",
+    "axios": "^1.7.0",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.0",
+    "fast-xml-parser": "^4.4.0",
+    "p-limit": "^3.1.0",
+    "pg": "^8.12.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "typeorm": "^0.3.20",
+    "typeorm-naming-strategies": "^4.1.0"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^10.4.0",
+    "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.14.0",
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.0",
+    "ts-jest": "^29.2.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.0"
+  }
+}

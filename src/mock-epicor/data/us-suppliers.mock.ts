@@ -1,0 +1,370 @@
+/**
+ * Mock supplier rows in US Epicor's native shape.
+ *
+ * Field names mirror Epicor's `Vendor` table (US/Canada localisation), so that
+ * the integration layer can exercise its US→canonical normaliser end-to-end.
+ *
+ * Mix:
+ *   - 25 total rows
+ *   - 21 active   (`InActive === false`)
+ *   -  4 inactive (`InActive === true`) — to test that the sync filters them
+ *
+ * Companies cover the realistic vendor categories an automotive metal-parts
+ * manufacturer like Martinrea would buy from: steel coil, tooling & die,
+ * industrial chemicals & lubricants, packaging, MRO, and freight.
+ */
+
+export interface USSupplierRecord {
+  VendorNum: string;
+  Name: string;
+  VendorId: string;
+  Address1: string;
+  City: string;
+  State: string;
+  Country: 'US';
+  InActive: boolean;
+  VendorType: 'SUP';
+  CurrencyCode: 'USD';
+  PayTerms: 'NET30' | 'NET45' | 'NET60' | 'NET90';
+}
+
+export const US_SUPPLIERS: USSupplierRecord[] = [
+  // ── Steel coil & raw metal (5) ─────────────────────────────────
+  {
+    VendorNum: 'V-10042',
+    Name: 'Great Lakes Steel Supply Co.',
+    VendorId: '38-4521890',
+    Address1: '4400 Industrial Pkwy',
+    City: 'Cleveland',
+    State: 'OH',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET30',
+  },
+  {
+    VendorNum: 'V-10043',
+    Name: 'Midwest Steel & Coil Inc.',
+    VendorId: '36-2210447',
+    Address1: '1820 Coil Mill Rd',
+    City: 'Gary',
+    State: 'IN',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET30',
+  },
+  {
+    VendorNum: 'V-10044',
+    Name: 'Cleveland-Cliffs Specialty Coil',
+    VendorId: '34-1502200',
+    Address1: '200 Public Square',
+    City: 'Cleveland',
+    State: 'OH',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET45',
+  },
+  {
+    VendorNum: 'V-10045',
+    Name: 'Pittsburgh Stainless Sheet LLC',
+    VendorId: '25-1934820',
+    Address1: '900 Steel Plaza',
+    City: 'Pittsburgh',
+    State: 'PA',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET30',
+  },
+  {
+    VendorNum: 'V-10046',
+    Name: 'Detroit Aluminum Mill Co.',
+    VendorId: '38-7891231',
+    Address1: '7600 W Jefferson Ave',
+    City: 'Detroit',
+    State: 'MI',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET30',
+  },
+
+  // ── Tooling, die, fixtures (5) ─────────────────────────────────
+  {
+    VendorNum: 'V-10089',
+    Name: 'Midwest Tooling & Die LLC',
+    VendorId: '35-9087123',
+    Address1: '5500 Stamping Way',
+    City: 'Toledo',
+    State: 'OH',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET45',
+  },
+  {
+    VendorNum: 'V-10091',
+    Name: 'Detroit Die & Fixture Works Inc.',
+    VendorId: '38-2200994',
+    Address1: '12 Press Shop Dr',
+    City: 'Sterling Heights',
+    State: 'MI',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET60',
+  },
+  {
+    VendorNum: 'V-10092',
+    Name: 'Northern Precision Tooling Co.',
+    VendorId: '38-3320021',
+    Address1: '100 Precision Pkwy',
+    City: 'Grand Rapids',
+    State: 'MI',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET60',
+  },
+  {
+    VendorNum: 'V-10093',
+    Name: 'Buckeye Tool & Die Co.',
+    VendorId: '34-4419003',
+    Address1: '3300 Industrial Blvd',
+    City: 'Columbus',
+    State: 'OH',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET45',
+  },
+  {
+    VendorNum: 'V-10094',
+    Name: 'Wolverine Stamping Tools LLC',
+    VendorId: '38-7782214',
+    Address1: '5 Wolverine Way',
+    City: 'Ann Arbor',
+    State: 'MI',
+    Country: 'US',
+    InActive: true, // INACTIVE — should be filtered out
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET60',
+  },
+
+  // ── Lubricants, chemicals, fluids (4) ──────────────────────────
+  {
+    VendorNum: 'V-10211',
+    Name: 'Houghton Industrial Lubricants Inc.',
+    VendorId: '23-1944002',
+    Address1: '945 Hopkins Rd',
+    City: 'Valley Forge',
+    State: 'PA',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET30',
+  },
+  {
+    VendorNum: 'V-10212',
+    Name: 'Quaker Chemical Company',
+    VendorId: '23-0993004',
+    Address1: '901 E Hector St',
+    City: 'Conshohocken',
+    State: 'PA',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET30',
+  },
+  {
+    VendorNum: 'V-10213',
+    Name: 'Castrol Industrial North America',
+    VendorId: '06-1234567',
+    Address1: '1500 Valley Rd',
+    City: 'Wayne',
+    State: 'NJ',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET45',
+  },
+  {
+    VendorNum: 'V-10214',
+    Name: 'Cincinnati Cutting Fluids Co.',
+    VendorId: '31-7720045',
+    Address1: '300 Refinery Ln',
+    City: 'Cincinnati',
+    State: 'OH',
+    Country: 'US',
+    InActive: true, // INACTIVE
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET30',
+  },
+
+  // ── Packaging (3) ──────────────────────────────────────────────
+  {
+    VendorNum: 'V-10330',
+    Name: 'Great Lakes Packaging Solutions Inc.',
+    VendorId: '38-1102003',
+    Address1: '4400 Box Plant Rd',
+    City: 'Battle Creek',
+    State: 'MI',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET30',
+  },
+  {
+    VendorNum: 'V-10331',
+    Name: 'Industrial Corrugated Co.',
+    VendorId: '36-9988120',
+    Address1: '8200 Carton Way',
+    City: 'Chicago',
+    State: 'IL',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET30',
+  },
+  {
+    VendorNum: 'V-10332',
+    Name: 'Returnable Container Systems LLC',
+    VendorId: '38-7711234',
+    Address1: '1 Container Park',
+    City: 'Wixom',
+    State: 'MI',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET45',
+  },
+
+  // ── MRO (4) ────────────────────────────────────────────────────
+  {
+    VendorNum: 'V-10501',
+    Name: 'W.W. Grainger Industrial Supply',
+    VendorId: '36-1150280',
+    Address1: '100 Grainger Pkwy',
+    City: 'Lake Forest',
+    State: 'IL',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET30',
+  },
+  {
+    VendorNum: 'V-10502',
+    Name: 'Fastenal Industrial & Construction',
+    VendorId: '41-0948415',
+    Address1: '2001 Theurer Blvd',
+    City: 'Winona',
+    State: 'MN',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET30',
+  },
+  {
+    VendorNum: 'V-10503',
+    Name: 'MSC Industrial Direct Co.',
+    VendorId: '11-3289165',
+    Address1: '75 Maxess Rd',
+    City: 'Melville',
+    State: 'NY',
+    Country: 'US',
+    InActive: true, // INACTIVE — wound down after Q3 consolidation
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET45',
+  },
+  {
+    VendorNum: 'V-10504',
+    Name: 'McMaster-Carr Supply Company',
+    VendorId: '36-1015830',
+    Address1: '600 N County Line Rd',
+    City: 'Elmhurst',
+    State: 'IL',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET30',
+  },
+
+  // ── Forklift / safety / consumables (2) ────────────────────────
+  {
+    VendorNum: 'V-10605',
+    Name: 'Hyster-Yale Forklift Parts Co.',
+    VendorId: '34-3201190',
+    Address1: '5875 Landerbrook Dr',
+    City: 'Cleveland',
+    State: 'OH',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET45',
+  },
+  {
+    VendorNum: 'V-10606',
+    Name: 'Industrial Safety Equipment Inc.',
+    VendorId: '38-9930012',
+    Address1: '120 PPE Plaza',
+    City: 'Livonia',
+    State: 'MI',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET30',
+  },
+
+  // ── Logistics / freight (2) ────────────────────────────────────
+  {
+    VendorNum: 'V-10721',
+    Name: 'Detroit Logistics & Freight LLC',
+    VendorId: '38-4488110',
+    Address1: '1500 Logistics Pkwy',
+    City: 'Romulus',
+    State: 'MI',
+    Country: 'US',
+    InActive: false,
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET30',
+  },
+  {
+    VendorNum: 'V-10722',
+    Name: 'Great Lakes Trucking Co.',
+    VendorId: '38-9988772',
+    Address1: '400 Diesel Way',
+    City: 'Toledo',
+    State: 'OH',
+    Country: 'US',
+    InActive: true, // INACTIVE
+    VendorType: 'SUP',
+    CurrencyCode: 'USD',
+    PayTerms: 'NET30',
+  },
+];
