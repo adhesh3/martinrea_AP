@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: martinrea-ap-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: martinrea
+      POSTGRES_PASSWORD: martinrea_dev_pwd
+      POSTGRES_DB: martinrea_ap
+    ports:
+      - "5432:5432"
+    volumes:
+      - martinrea_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U martinrea -d martinrea_ap"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Local SMTP catcher for WF-04 development.
+  # SMTP listens on 1025, web UI on http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: martinrea-ap-mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    environment:
+      MP_MAX_MESSAGES: 5000
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+
+  # Keycloak IdP for WF-01 production auth (local dev image).
+  # Admin console: http://localhost:8080  (login admin / admin on first boot)
+  # Data persisted in the martinrea_keycloak_data volume so realms + users
+  # survive container restarts.
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    container_name: martinrea-keycloak
+    command: start-dev
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "8080:8080"
+    volumes:
+      - martinrea_keycloak_data:/opt/keycloak/data
+    restart: unless-stopped
+
+volumes:
+  martinrea_pg_data:
+  martinrea_keycloak_data:
