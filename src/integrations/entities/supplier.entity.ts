@@ -1,13 +1,15 @@
-// Canonical schema per Roshni (Data track). Aligned with `dto/supplier.dto.ts`.
+// Canonical schema per the unified Martinrea AP data model (Roshni / DAT-01).
+// Mirrors the shared `suppliers` table: a single global supplier master keyed
+// by `supplier_code` (no per-instance dimension). The Epicor sync maps every
+// plant's vendor master onto this one table.
 //
 // Key invariants:
-//   - `(supplier_code, instance_id)` is unique. Epicor codes are only unique
-//     within a single plant instance — the same `VendorNum` can legitimately
-//     refer to different suppliers in two different plants.
-//   - `tax_id` is nullable. RFC (MX) / EIN (US) / BN (CA) — sometimes absent
-//     in legacy Epicor rows; we store what the ERP gives us.
-//   - Soft-delete only via `deleted_at`. Hard deletes never run against this
-//     table; the `purchase_orders.supplier_id` FK relies on the row surviving.
+//   - `supplier_code` is globally unique (the canonical key invoices + POs
+//     reference). Epicor `VendorNum` (US/CA) / `CodigoProveedor` (MX) is used
+//     verbatim as the code.
+//   - `payment_terms_days` is an integer (e.g. 30), not a free-text term.
+//   - Active state is the boolean `is_active`.
+//   - Soft-delete only via `deleted_at` (paranoid).
 
 import {
   Column,
@@ -20,50 +22,44 @@ import {
 } from 'typeorm';
 
 @Entity('suppliers')
-@Unique(['supplierCode', 'instanceId'])
+@Unique(['supplierCode'])
 export class SupplierEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ type: 'varchar', length: 64 })
+  @Column({ type: 'varchar', length: 50 })
   supplierCode!: string;
 
-  @Column({ type: 'varchar', length: 256 })
-  supplierName!: string;
+  @Column({ type: 'varchar', length: 255 })
+  name!: string;
 
-  /** Tax registration number (RFC for MX, EIN for US, BN for CA). */
-  @Column({ type: 'varchar', length: 32, nullable: true })
+  /** Tax registration number (RFC for MX, EIN for US, BN for CA). Nullable. */
+  @Column({ type: 'varchar', length: 60, nullable: true })
   taxId!: string | null;
 
-  /** ISO 3166-1 alpha-2 country code. */
-  @Column({ type: 'varchar', length: 2 })
-  country!: string;
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  email!: string | null;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  phone!: string | null;
+
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  address!: string | null;
 
   /** ISO 4217 currency code. */
-  @Column({ type: 'varchar', length: 3 })
-  currencyCode!: string;
+  @Column({ type: 'varchar', length: 3, default: 'USD' })
+  currency!: string;
 
-  /** Free-text payment terms from the source ERP (e.g. "NET30"). */
-  @Column({ type: 'varchar', length: 64, nullable: true })
-  payTerms!: string | null;
+  /** ISO 3166-1 alpha-2 country code. */
+  @Column({ type: 'varchar', length: 2, nullable: true })
+  countryCode!: string | null;
 
-  @Column({ type: 'varchar', length: 256, nullable: true })
-  addressLine1!: string | null;
+  /** Payment terms in days (e.g. 30, 45, 60). */
+  @Column({ type: 'int', nullable: true })
+  paymentTermsDays!: number | null;
 
-  @Column({ type: 'varchar', length: 128, nullable: true })
-  city!: string | null;
-
-  @Column({ type: 'varchar', length: 128, nullable: true })
-  stateProvince!: string | null;
-
-  @Column({ type: 'varchar', length: 16, default: 'ACTIVE' })
-  status!: string;
-
-  @Column({ type: 'int' })
-  instanceId!: number;
-
-  @Column({ type: 'timestamptz', nullable: true })
-  lastSyncedAt!: Date | null;
+  @Column({ type: 'boolean', default: true })
+  isActive!: boolean;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;

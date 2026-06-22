@@ -40,6 +40,12 @@ const MX_INSTANCE: EpicorInstance = {
   plantName: 'Test-MX-Plant',
 } as EpicorInstance;
 
+const CA_INSTANCE: EpicorInstance = {
+  instanceId: 35,
+  region: 'CANADA',
+  plantName: 'Test-CA-Plant',
+} as EpicorInstance;
+
 // `normalizeSupplier` and `fetchSuppliersFromEpicor` are private — exercise
 // them via the public `syncForInstance` entrypoint, asserting on the rows the
 // fake repo's query builder ultimately receives.
@@ -50,6 +56,7 @@ function makeStubMockEpicor(
     simulateConnectionDelay: jest.fn(async () => undefined),
     getUSSuppliers: jest.fn(() => []),
     getMexicoSuppliers: jest.fn(() => []),
+    getCanadaSuppliers: jest.fn(() => []),
   };
   return Object.assign(base, overrides) as unknown as MockEpicorService;
 }
@@ -89,10 +96,21 @@ describe('SuppliersSyncService.upsertToDatabase', () => {
 
     expect(repo.createQueryBuilder).toHaveBeenCalledTimes(1);
     expect(builder.execute).toHaveBeenCalledTimes(1);
-    // Conflict target + update list match the spec verbatim.
+    // Conflict target is the global supplier_code; update list is the
+    // canonical column set.
     expect(builder.orUpdate).toHaveBeenCalledWith(
-      ['supplier_name', 'tax_id', 'status', 'last_synced_at'],
-      ['supplier_code', 'instance_id'],
+      [
+        'name',
+        'tax_id',
+        'email',
+        'phone',
+        'address',
+        'currency',
+        'country_code',
+        'payment_terms_days',
+        'is_active',
+      ],
+      ['supplier_code'],
     );
     expect(result).toEqual({
       fetched: 3,
@@ -135,14 +153,14 @@ describe('SuppliersSyncService normalisation (via syncForInstance)', () => {
     >;
     expect(values).toHaveLength(1);
     expect(values[0].supplierCode).toBe('V-10042');
-    expect(values[0].supplierName).toBe('Great Lakes Steel');
+    expect(values[0].name).toBe('Great Lakes Steel');
     expect(values[0].taxId).toBe('38-4521890');
-    expect(values[0].country).toBe('US');
-    expect(values[0].currencyCode).toBe('USD');
-    expect(values[0].payTerms).toBe('NET30');
-    expect(values[0].city).toBe('Cleveland');
-    expect(values[0].stateProvince).toBe('OH');
-    expect(values[0].status).toBe('ACTIVE');
+    expect(values[0].countryCode).toBe('US');
+    expect(values[0].currency).toBe('USD');
+    // "NET30" parses onto the integer day count.
+    expect(values[0].paymentTermsDays).toBe(30);
+    expect(values[0].address).toBe('4400 Industrial Pkwy');
+    expect(values[0].isActive).toBe(true);
   });
 
   it('4. normalizeMexicoSupplier maps CodigoProveedor → supplierCode (and normalises Pais → MX)', async () => {
@@ -174,16 +192,56 @@ describe('SuppliersSyncService normalisation (via syncForInstance)', () => {
       Record<string, unknown>
     >;
     expect(values[0].supplierCode).toBe('PROV-2041');
-    expect(values[0].supplierName).toBe('Aceros del Norte');
+    expect(values[0].name).toBe('Aceros del Norte');
     expect(values[0].taxId).toBe('ANO850301ABC');
     // Country must collapse to ISO 3166-1 alpha-2 — the entity column is
     // varchar(2), so `'Mexico'` would violate the schema.
-    expect(values[0].country).toBe('MX');
-    expect(values[0].currencyCode).toBe('MXN');
-    expect(values[0].payTerms).toBe('NETO30');
+    expect(values[0].countryCode).toBe('MX');
+    expect(values[0].currency).toBe('MXN');
+    // "NETO30" → 30 (numeric portion extracted).
+    expect(values[0].paymentTermsDays).toBe(30);
   });
 
-  it('5. Activo:true → ACTIVE, Activo:false → INACTIVE', async () => {
+  it('5b. normalizeCanadaSupplier uses the English path (VendorNum → supplierCode, CAD, CA)', async () => {
+    const { repo, builder } = makeRepo([{ id: 'id-1', created: true }]);
+    const mock = makeStubMockEpicor({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      getCanadaSuppliers: jest.fn((() => [
+        {
+          VendorNum: 'V-20051',
+          Name: 'Algoma Steel Inc.',
+          VendorId: '84621 5532 RT0001',
+          Address1: '105 West St',
+          City: 'Sault Ste. Marie',
+          State: 'ON',
+          Country: 'CA',
+          InActive: false,
+          VendorType: 'SUP',
+          CurrencyCode: 'CAD',
+          PayTerms: 'NET30',
+          instanceId: 35,
+        },
+      ])) as any,
+    });
+    const service = new SuppliersSyncService(mock, repo);
+
+    await service.syncForInstance(CA_INSTANCE);
+
+    expect(mock.getCanadaSuppliers).toHaveBeenCalledWith(35, null);
+    const values = builder.values.mock.calls[0][0] as Array<
+      Record<string, unknown>
+    >;
+    expect(values).toHaveLength(1);
+    expect(values[0].supplierCode).toBe('V-20051');
+    expect(values[0].name).toBe('Algoma Steel Inc.');
+    expect(values[0].taxId).toBe('84621 5532 RT0001');
+    expect(values[0].countryCode).toBe('CA');
+    expect(values[0].currency).toBe('CAD');
+    expect(values[0].address).toBe('105 West St');
+    expect(values[0].isActive).toBe(true);
+  });
+
+  it('5. Activo:true → isActive:true, Activo:false → isActive:false', async () => {
     const { repo, builder } = makeRepo([
       { id: 'id-1', created: true },
       { id: 'id-2', created: true },
@@ -228,8 +286,8 @@ describe('SuppliersSyncService normalisation (via syncForInstance)', () => {
     const values = builder.values.mock.calls[0][0] as Array<
       Record<string, unknown>
     >;
-    expect(values[0].status).toBe('ACTIVE');
-    expect(values[1].status).toBe('INACTIVE');
+    expect(values[0].isActive).toBe(true);
+    expect(values[1].isActive).toBe(false);
   });
 });
 

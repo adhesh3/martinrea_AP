@@ -13,6 +13,8 @@ import { MockEpicorService } from './mock-epicor.service';
 const WARNING =
   'MOCK DATA — Not real Epicor CMS. For demo and testing only.';
 
+type MockRegion = 'US' | 'MEXICO' | 'CANADA';
+
 class MockListQuery {
   @Type(() => Number)
   @IsInt()
@@ -21,8 +23,8 @@ class MockListQuery {
   instance!: number;
 
   @IsString()
-  @IsIn(['US', 'MEXICO'])
-  region!: 'US' | 'MEXICO';
+  @IsIn(['US', 'MEXICO', 'CANADA'])
+  region!: MockRegion;
 }
 
 class MockGoodsReceiptsQuery {
@@ -38,14 +40,14 @@ class MockGoodsReceiptsQuery {
 
   @IsOptional()
   @IsString()
-  @IsIn(['US', 'MEXICO'])
-  region?: 'US' | 'MEXICO';
+  @IsIn(['US', 'MEXICO', 'CANADA'])
+  region?: MockRegion;
 }
 
 interface MockEnvelope<T> {
   _warning: string;
   _instance: number;
-  _region: 'US' | 'MEXICO';
+  _region: MockRegion;
   data: T;
 }
 
@@ -63,15 +65,20 @@ export class MockEpicorController {
 
   @Get('suppliers')
   @ApiOperation({
-    summary: 'List active suppliers in their native Epicor shape (US or MX).',
+    summary:
+      'List active suppliers in their native Epicor shape (US / MX / CA).',
   })
   @ApiQuery({ name: 'instance', required: true, type: Number })
-  @ApiQuery({ name: 'region', required: true, enum: ['US', 'MEXICO'] })
+  @ApiQuery({ name: 'region', required: true, enum: ['US', 'MEXICO', 'CANADA'] })
   listSuppliers(@Query() q: MockListQuery): MockEnvelope<unknown[]> {
-    const data =
-      q.region === 'US'
-        ? this.mock.getUSSuppliers(q.instance)
-        : this.mock.getMexicoSuppliers(q.instance);
+    let data: unknown[];
+    if (q.region === 'MEXICO') {
+      data = this.mock.getMexicoSuppliers(q.instance);
+    } else if (q.region === 'CANADA') {
+      data = this.mock.getCanadaSuppliers(q.instance);
+    } else {
+      data = this.mock.getUSSuppliers(q.instance);
+    }
     return this.envelope(q.instance, q.region, data);
   }
 
@@ -80,12 +87,16 @@ export class MockEpicorController {
     summary: 'List open purchase orders in their native Epicor shape.',
   })
   @ApiQuery({ name: 'instance', required: true, type: Number })
-  @ApiQuery({ name: 'region', required: true, enum: ['US', 'MEXICO'] })
+  @ApiQuery({ name: 'region', required: true, enum: ['US', 'MEXICO', 'CANADA'] })
   listPurchaseOrders(@Query() q: MockListQuery): MockEnvelope<unknown[]> {
-    const data =
-      q.region === 'US'
-        ? this.mock.getUSOpenPOs(q.instance)
-        : this.mock.getMexicoOpenPOs(q.instance);
+    let data: unknown[];
+    if (q.region === 'MEXICO') {
+      data = this.mock.getMexicoOpenPOs(q.instance);
+    } else if (q.region === 'CANADA') {
+      data = this.mock.getCanadaOpenPOs(q.instance);
+    } else {
+      data = this.mock.getUSOpenPOs(q.instance);
+    }
     return this.envelope(q.instance, q.region, data);
   }
 
@@ -93,34 +104,37 @@ export class MockEpicorController {
   @ApiOperation({
     summary:
       'List goods receipts for a PO. Region is auto-detected from the PO number ' +
-      '(`OC-...` → MEXICO, otherwise US) unless explicitly passed.',
+      '(`OC-...` → MEXICO, `PO-CA-...` → CANADA, otherwise US) unless explicitly passed.',
   })
   @ApiQuery({ name: 'po', required: true, type: String })
   @ApiQuery({ name: 'instance', required: true, type: Number })
   @ApiQuery({
     name: 'region',
     required: false,
-    enum: ['US', 'MEXICO'],
+    enum: ['US', 'MEXICO', 'CANADA'],
   })
   async listGoodsReceipts(
     @Query() q: MockGoodsReceiptsQuery,
   ): Promise<MockEnvelope<unknown[]>> {
-    const region = q.region ?? (q.po.startsWith('OC-') ? 'MEXICO' : 'US');
-    if (region !== 'US' && region !== 'MEXICO') {
+    const region = q.region ?? detectRegionFromPo(q.po);
+    let data: unknown[];
+    if (region === 'MEXICO') {
+      data = await this.mock.getMexicoGoodsReceipts(q.po, q.instance);
+    } else if (region === 'CANADA') {
+      data = await this.mock.getCanadaGoodsReceipts(q.po, q.instance);
+    } else if (region === 'US') {
+      data = await this.mock.getUSGoodsReceipts(q.po, q.instance);
+    } else {
       throw new BadRequestException(
-        'region must be either "US" or "MEXICO"',
+        'region must be one of "US", "MEXICO" or "CANADA"',
       );
     }
-    const data =
-      region === 'US'
-        ? await this.mock.getUSGoodsReceipts(q.po, q.instance)
-        : await this.mock.getMexicoGoodsReceipts(q.po, q.instance);
     return this.envelope(q.instance, region, data);
   }
 
   private envelope<T>(
     instance: number,
-    region: 'US' | 'MEXICO',
+    region: MockRegion,
     data: T,
   ): MockEnvelope<T> {
     return {
@@ -130,4 +144,17 @@ export class MockEpicorController {
       data,
     };
   }
+}
+
+/**
+ * Best-effort region guess from a PO number prefix, used only when the caller
+ * doesn't pass an explicit `region`:
+ *   - `OC-...`    → MEXICO (Orden de Compra)
+ *   - `PO-CA-...` → CANADA
+ *   - otherwise   → US
+ */
+function detectRegionFromPo(po: string): MockRegion {
+  if (po.startsWith('OC-')) return 'MEXICO';
+  if (po.startsWith('PO-CA-')) return 'CANADA';
+  return 'US';
 }

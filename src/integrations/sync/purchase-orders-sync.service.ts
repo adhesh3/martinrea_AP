@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Repository } from 'typeorm';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 
 import {
+  CanadaPurchaseOrderWire,
   MexicoPurchaseOrderWire,
   MockEpicorService,
   USPurchaseOrderWire,
@@ -13,8 +14,10 @@ import {
   PurchaseOrderLineItem,
   PurchaseOrderStatus,
 } from '../dto/purchase-order.dto';
-import { PurchaseOrderLineEntity } from '../entities/purchase-order-line.entity';
-import { PurchaseOrderEntity } from '../entities/purchase-order.entity';
+import {
+  PurchaseOrderEntity,
+  PurchaseOrderStatus as CanonicalPoStatus,
+} from '../entities/purchase-order.entity';
 
 export interface PurchaseOrderSyncCounts {
   fetched: number;
@@ -23,19 +26,27 @@ export interface PurchaseOrderSyncCounts {
   failed: number;
 }
 
-type RawPO = USPurchaseOrderWire | MexicoPurchaseOrderWire;
+type RawPO =
+  | USPurchaseOrderWire
+  | MexicoPurchaseOrderWire
+  | CanadaPurchaseOrderWire;
+
+/** US and Canada Epicor ship the same English PO header + line shape. */
+type EnglishPOWire = USPurchaseOrderWire | CanadaPurchaseOrderWire;
 
 /**
  * Worker for INT-02 (purchase-orders nightly sync).
  *
  * Pulls open POs from a single Epicor instance, normalises them onto
- * `PurchaseOrderDto`, and upserts into `purchase_orders` +
- * `purchase_order_lines`. Headers are upserted in bulk via
- * `INSERT ... ON CONFLICT (po_number, instance_id) DO UPDATE`; line items
- * use a delete-then-insert strategy (simpler than line-level conflict
- * resolution — `purchase_order_lines.po_id` has `ON DELETE CASCADE`). The
- * entire write is wrapped in a single transaction so partial failures
- * never leave a PO without lines (or with stale lines).
+ * `PurchaseOrderDto`, and upserts the header into the canonical
+ * `purchase_orders` table via `INSERT ... ON CONFLICT (po_number) DO UPDATE`.
+ * `po_number` is a single global namespace (no per-instance dimension).
+ *
+ * Line items are NOT persisted to a child table in the canonical model — the
+ * shared schema keeps PO headers only (line-level detail lives on the goods
+ * receipt's `line_items` JSONB). The sync still normalises lines so it can
+ * derive `total_amount` when the source header omits it. Stateless — driven by
+ * the orchestrator (`EpicorSyncService`).
  */
 @Injectable()
 export class PurchaseOrdersSyncService {
@@ -45,10 +56,6 @@ export class PurchaseOrdersSyncService {
     private readonly mockEpicor: MockEpicorService,
     @InjectRepository(PurchaseOrderEntity)
     private readonly poRepo: Repository<PurchaseOrderEntity>,
-    @InjectRepository(PurchaseOrderLineEntity)
-    private readonly poLineRepo: Repository<PurchaseOrderLineEntity>,
-    @InjectDataSource()
-    private readonly dataSource: DataSource,
   ) {}
 
   /**
@@ -125,8 +132,12 @@ export class PurchaseOrdersSyncService {
     if (instance.region === 'MEXICO') {
       return this.mockEpicor.getMexicoOpenPOs(instance.instanceId, since);
     }
+    if (instance.region === 'CANADA') {
+      return this.mockEpicor.getCanadaOpenPOs(instance.instanceId, since);
+    }
+    // Defensive fallback for any future region not yet wired.
     this.logger.warn(
-      `Canada region not yet wired (instance=${instance.instanceId}, plant=${instance.plantName}). Returning empty PO list.`,
+      `Region '${instance.region}' not yet wired (instance=${instance.instanceId}, plant=${instance.plantName}). Returning empty PO list.`,
     );
     return [];
   }
@@ -134,11 +145,12 @@ export class PurchaseOrdersSyncService {
   /**
    * Map a raw Epicor row onto the canonical `PurchaseOrderDto`.
    *
-   * US     : PONum→poNumber, VendorNum→supplierCode (and seed for
+   * US/CA  : PONum→poNumber, VendorNum→supplierCode (and seed for
    *          deterministic supplierId), OpenOrder===true→OPEN,
    *          LineDesc→description, OrderQty→orderedQty, UnitCost→unitPrice,
    *          Plant→plantId, TotalOrderAmt→totalAmount,
-   *          NeedByDate→needByDate, CurrencyCode→currency.
+   *          NeedByDate→needByDate, CurrencyCode→currency. (Canada Epicor
+   *          uses the same English POHeader/PODetail shape as the US plants.)
    * Mexico : NumOrden→poNumber, CodigoProveedor→supplierCode,
    *          OrdenAbierta===true→OPEN, Descripcion→description,
    *          CantidadPedida→orderedQty, CostoUnitario→unitPrice,
@@ -160,13 +172,11 @@ export class PurchaseOrdersSyncService {
         unitOfMeasure: l.UnidadMedida,
       }));
       return {
-        poId: deterministicUuid(
-          `mx:po:${instance.instanceId}:${r.NumOrden}`,
-        ),
+        // Deterministic ids are seeded from the globally-unique business keys
+        // (po_number / supplier_code) only — no instance dimension.
+        poId: deterministicUuid(r.NumOrden),
         poNumber: r.NumOrden,
-        supplierId: deterministicUuid(
-          `mx:${instance.instanceId}:${r.CodigoProveedor}`,
-        ),
+        supplierId: deterministicUuid(r.CodigoProveedor),
         supplierCode: r.CodigoProveedor,
         supplierName: r.CodigoProveedor,
         lineItems,
@@ -182,7 +192,7 @@ export class PurchaseOrdersSyncService {
       };
     }
 
-    const r = raw as USPurchaseOrderWire;
+    const r = raw as EnglishPOWire;
     const lineItems: PurchaseOrderLineItem[] = r.Lines.map((l) => ({
       lineNum: l.LineNum,
       description: l.LineDesc,
@@ -192,13 +202,10 @@ export class PurchaseOrdersSyncService {
       unitOfMeasure: l.UOM,
     }));
     return {
-      poId: deterministicUuid(
-        `${instance.region.toLowerCase()}:po:${instance.instanceId}:${r.PONum}`,
-      ),
+      // See note above: ids seeded from globally-unique business keys.
+      poId: deterministicUuid(r.PONum),
       poNumber: r.PONum,
-      supplierId: deterministicUuid(
-        `${instance.region.toLowerCase()}:${instance.instanceId}:${r.VendorNum}`,
-      ),
+      supplierId: deterministicUuid(r.VendorNum),
       supplierCode: r.VendorNum,
       supplierName: r.VendorNum,
       lineItems,
@@ -215,18 +222,17 @@ export class PurchaseOrdersSyncService {
   }
 
   /**
-   * Bulk-upsert PO headers + replace-all on line items, transactionally.
+   * Bulk-upsert PO headers onto the canonical `purchase_orders` table via
+   * `INSERT ... ON CONFLICT (po_number) DO UPDATE`.
    *
-   * Strategy:
-   *   1. `INSERT ... ON CONFLICT (po_number, instance_id) DO UPDATE` over the
-   *      whole header batch. `RETURNING (xmax = 0) AS created` lets us
-   *      tally inserted vs updated.
-   *   2. `DELETE FROM purchase_order_lines WHERE po_id IN (...)` for every
-   *      PO id we just touched.
-   *   3. Bulk INSERT all the new line rows.
+   * The canonical schema stores headers only — there is no PO line table — so
+   * this is a single, transaction-free upsert. The internal `PurchaseOrderDto`
+   * is mapped onto the canonical columns here:
+   *   needByDate → expected_delivery_date, status → canonical status text,
+   *   supplierName/plantId/currency/totalAmount carried through. `vendor_code`,
+   *   `issued_date` and `notes` aren't sourced from Epicor yet (NULL).
    *
-   * Steps 1–3 run inside a single transaction so a partial failure never
-   * leaves a PO header without its lines.
+   * `RETURNING (xmax = 0) AS created` lets us tally inserted vs updated.
    */
   async upsertToDatabase(
     pos: PurchaseOrderDto[],
@@ -239,76 +245,56 @@ export class PurchaseOrdersSyncService {
     const headerValues = pos.map((po) => ({
       id: po.poId,
       poNumber: po.poNumber,
-      supplierId: po.supplierId,
       supplierCode: po.supplierCode,
-      instanceId: po.instanceId,
-      status: po.status,
+      vendorCode: null,
+      supplierName: po.supplierName,
+      plantId: po.plantId,
+      currency: po.currency,
       // NUMERIC columns are typed as `string` in TypeORM to preserve precision
       // (the `pg` driver returns them as strings on read). Postgres accepts a
       // JS number on insert, but `_QueryDeepPartialEntity<PurchaseOrderEntity>`
       // is strict — serialise here so the call type-checks.
       totalAmount: po.totalAmount.toFixed(2),
-      currency: po.currency,
-      plantId: po.plantId,
-      needByDate: po.needByDate,
-      lastSyncedAt: po.lastSyncedAt,
+      status: toCanonicalPoStatus(po.status),
+      issuedDate: null,
+      expectedDeliveryDate: po.needByDate,
+      notes: null,
     }));
 
-    let inserted = 0;
-    let updated = 0;
+    const result = await this.poRepo
+      .createQueryBuilder()
+      .insert()
+      .into(PurchaseOrderEntity)
+      .values(headerValues)
+      // See note in suppliers-sync.service.ts — `.orUpdate(...)` strings are
+      // emitted verbatim and must already be in snake_case to match the schema
+      // produced by SnakeNamingStrategy.
+      .orUpdate(
+        [
+          'supplier_code',
+          'vendor_code',
+          'supplier_name',
+          'plant_id',
+          'currency',
+          'total_amount',
+          'status',
+          'issued_date',
+          'expected_delivery_date',
+          'notes',
+        ],
+        ['po_number'],
+      )
+      .returning('"id", (xmax = 0) AS "created"')
+      .execute();
 
-    await this.dataSource.transaction(async (manager) => {
-      const headerResult = await manager
-        .createQueryBuilder()
-        .insert()
-        .into(PurchaseOrderEntity)
-        .values(headerValues)
-        // See note in suppliers-sync.service.ts — `.orUpdate(...)` strings
-        // are emitted verbatim and must already be in snake_case to match
-        // the schema produced by SnakeNamingStrategy.
-        .orUpdate(
-          ['status', 'total_amount', 'need_by_date', 'last_synced_at'],
-          ['po_number', 'instance_id'],
-        )
-        .returning('"id", (xmax = 0) AS "created"')
-        .execute();
-
-      const rows = (headerResult.raw ?? []) as Array<{
-        id: string;
-        created: boolean | number;
-      }>;
-      inserted = rows.filter(
-        (r) => r.created === true || r.created === 1,
-      ).length;
-      updated = rows.length - inserted;
-
-      const poIds = pos.map((p) => p.poId);
-      await manager.delete(PurchaseOrderLineEntity, { poId: In(poIds) });
-
-      const allLines = pos.flatMap((po) =>
-        po.lineItems.map((l) => ({
-          poId: po.poId,
-          lineNumber: l.lineNum,
-          partNumber: null,
-          description: l.description,
-          // See NUMERIC-column note in the header `values` block above.
-          orderedQty: l.orderedQty.toFixed(4),
-          unitPrice: l.unitPrice.toFixed(2),
-          lineTotal: l.lineTotal.toFixed(2),
-          unitOfMeasure: l.unitOfMeasure,
-          openLine: true,
-        })),
-      );
-
-      if (allLines.length > 0) {
-        await manager
-          .createQueryBuilder()
-          .insert()
-          .into(PurchaseOrderLineEntity)
-          .values(allLines)
-          .execute();
-      }
-    });
+    const rows = (result.raw ?? []) as Array<{
+      id: string;
+      created: boolean | number;
+    }>;
+    const inserted = rows.filter(
+      (r) => r.created === true || r.created === 1,
+    ).length;
+    const updated = rows.length - inserted;
 
     this.logger.debug(
       `[POs] instance=${instanceId} upserted ${pos.length} header(s) (inserted=${inserted}, updated=${updated}).`,
@@ -341,6 +327,25 @@ function parseDateOrNull(raw: string | null | undefined): Date | null {
   const d = new Date(raw);
   return Number.isFinite(d.getTime()) ? d : null;
 }
+
+/**
+ * Map the internal DTO status onto the canonical `purchase_orders.status`
+ * vocabulary. The DTO carries the coarse ERP states (OPEN/CLOSED/PARTIAL);
+ * the canonical schema spells partial receipts out as PARTIALLY_RECEIVED.
+ */
+function toCanonicalPoStatus(status: PurchaseOrderStatus): CanonicalPoStatus {
+  switch (status) {
+    case 'PARTIAL':
+      return 'PARTIALLY_RECEIVED';
+    case 'OPEN':
+      return 'OPEN';
+    case 'CLOSED':
+      return 'CLOSED';
+    default:
+      return 'OPEN';
+  }
+}
+
 function deterministicUuid(seed: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < seed.length; i++) {

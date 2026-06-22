@@ -1,0 +1,23 @@
+# Build artifacts and deps are produced inside the image — never copy the
+# host's versions in (stale compiled .js can otherwise shadow deleted source,
+# e.g. removed entities re-appearing via the entity glob).
+node_modules
+dist
+npm-debug.log*
+
+# VCS / local tooling
+.git
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+# Env files are injected at runtime via env_file/secrets, not baked in.
+.env
+.env.*
+!.env.example
+
+# Editor / OS noise
+.vscode
+.idea
+.DS_Store

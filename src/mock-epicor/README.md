@@ -8,8 +8,11 @@ We don't have real Epicor credentials yet — Martinrea hasn't provisioned VPN
 access or per-plant ODBC / SFTP creds, and the production AP application is
 already due for a Sprint-1 demo. This module fills that gap:
 
-- Holds realistic supplier / PO / GR fixtures in their **native** US and
-  Mexico Epicor shapes (the same field names the real ODBC clients will see).
+- Holds realistic supplier / PO / GR fixtures in their **native** US, Mexico,
+  and Canada Epicor shapes (the same field names the real ODBC / SFTP clients
+  will see). Canada reuses the US English `Vendor` / `POHeader` / `ReceiptHdr`
+  localisation — only the currency (`CAD`), country (`CA`), and plant codes
+  differ.
 - Simulates per-instance network behaviour — latency, occasional flakiness,
   and one deliberately-slow instance — so the integrations layer can exercise
   its normalisation, error-isolation, and timeout paths against something
@@ -21,11 +24,11 @@ When real Epicor lands, the entire `src/mock-epicor/` folder gets deleted.
 
 ## Data summary
 
-| Type            | US records      | Mexico records  |
-| --------------- | --------------- | --------------- |
-| Suppliers       | 25 (21 active)  | 15 (12 active)  |
-| Purchase Orders | 40 (30 open)    | 20 (15 open)    |
-| Goods Receipts  | 60              | 30              |
+| Type            | US records      | Mexico records  | Canada records  |
+| --------------- | --------------- | --------------- | --------------- |
+| Suppliers       | 25 (21 active)  | 15 (12 active)  | 12 (10 active)  |
+| Purchase Orders | 40 (30 open)    | 20 (15 open)    | 10 (8 open)     |
+| Goods Receipts  | 60              | 30              | 9               |
 
 All companies and part numbers are realistic for an automotive
 metal-stampings manufacturer:
@@ -73,9 +76,9 @@ the timeout handling in `goods-receipts.service.ts`.
 
 | Method | Path | Description |
 | ------ | ---- | ----------- |
-| `GET`  | `/mock-epicor/suppliers?instance=N&region=US\|MEXICO` | List active suppliers in their native shape. |
-| `GET`  | `/mock-epicor/purchase-orders?instance=N&region=US\|MEXICO` | List open POs in their native shape (line items included). |
-| `GET`  | `/mock-epicor/goods-receipts?po=PO-2024-00142&instance=N` | List receipts for a PO. Region auto-detected (`OC-…` → MEXICO). |
+| `GET`  | `/mock-epicor/suppliers?instance=N&region=US\|MEXICO\|CANADA` | List active suppliers in their native shape. |
+| `GET`  | `/mock-epicor/purchase-orders?instance=N&region=US\|MEXICO\|CANADA` | List open POs in their native shape (line items included). |
+| `GET`  | `/mock-epicor/goods-receipts?po=PO-2024-00142&instance=N` | List receipts for a PO. Region auto-detected (`OC-…` → MEXICO, `PO-CA-…` → CANADA, otherwise US). |
 
 Every response is wrapped in an envelope that loudly flags it as fake:
 
@@ -105,13 +108,18 @@ Every response is wrapped in an envelope that loudly flags it as fake:
 
 ## Field-name mapping reference
 
-The integration layer collapses three regional formats onto one canonical
-DTO. The mapping table below is the single source of truth.
+The integration layer collapses the regional formats onto one canonical DTO.
+The mapping tables below are the single source of truth. **Canada is not
+listed separately because it ships the identical English field names as the
+US column** — the sync layer routes both through the same normaliser (see the
+`EnglishSupplierWire` / `EnglishPOWire` aliases). Goods receipts from Canada
+are tagged `rawSource: 'CANADA'` so downstream consumers can still distinguish
+them (e.g. CAD vs USD handling).
 
 ### Suppliers
 
-| US Epicor       | Mexico Epicor       | Canonical (`SupplierDto`) |
-| --------------- | ------------------- | ------------------------- |
+| US / Canada Epicor | Mexico Epicor    | Canonical (`SupplierDto`) |
+| ------------------ | ---------------- | ------------------------- |
 | `VendorNum`     | `CodigoProveedor`   | `supplierCode`            |
 | `Name`          | `NombreProveedor`   | `supplierName`            |
 | `VendorId`      | `RFC`               | `taxId`                   |
@@ -120,7 +128,7 @@ DTO. The mapping table below is the single source of truth.
 
 ### Purchase Orders
 
-| US Epicor      | Mexico Epicor      | Canonical (`PurchaseOrderDto`) |
+| US / Canada Epicor | Mexico Epicor  | Canonical (`PurchaseOrderDto`) |
 | -------------- | ------------------ | ------------------------------ |
 | `PONum`        | `NumOrden`         | `poNumber`                     |
 | `VendorNum`    | `CodigoProveedor`  | `supplierId` (canonicalised)   |
@@ -134,7 +142,7 @@ DTO. The mapping table below is the single source of truth.
 
 ### Goods Receipts
 
-| US Epicor             | Mexico Epicor         | Canonical (`GoodsReceiptDto`)   |
+| US / Canada Epicor    | Mexico Epicor         | Canonical (`GoodsReceiptDto`)   |
 | --------------------- | --------------------- | ------------------------------- |
 | `ReceiptNum`          | `NumRecepcion`        | `grNumber`                      |
 | `PONum`               | `OrdenCompra`         | `poNumber`                      |

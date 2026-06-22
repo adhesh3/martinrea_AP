@@ -25,13 +25,13 @@ import { MockEpicorModule } from './mock-epicor/mock-epicor.module';
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
         // Single source of truth for column naming: entities keep camelCase
         // property names; this strategy converts them to snake_case at the
-        // SQL boundary so the migrations Roshni reviews stay Postgres-idiomatic.
-        // Required for any DB-touching code to work end-to-end against the
-        // V1–V5 migration schema.
+        // SQL boundary so they line up with the canonical schema (e.g. entity
+        // `supplierCode` -> column `supplier_code`). Must match the column
+        // names in Roshni's canonical migration.
         namingStrategy: new SnakeNamingStrategy(),
-        // NEVER true in prod — we let migrations own the schema there.
-        // In dev we let TypeORM auto-create tables so the verify steps
-        // run without manual DDL.
+        // NEVER true in prod — the canonical migration owns the schema there.
+        // In dev we let TypeORM auto-create tables from the entities so the
+        // verify steps run without manual DDL.
         synchronize:
           configService.get<string>('NODE_ENV') !== 'production',
         logging: configService.get<string>('NODE_ENV') !== 'production',

@@ -134,18 +134,25 @@ is the intended defensive behaviour until a real Epicor adapter ships.
 
 ## Database schema status
 
-V1–V5 SQL migrations for the tables this module owns
-(`suppliers`, `purchase_orders`, `purchase_order_lines`, `goods_receipts`,
-`goods_receipt_lines`) are in `migrations/`. They:
+The three shared tables this module reads/writes (`suppliers`,
+`purchase_orders`, `goods_receipts`) follow the team's canonical shape: a
+single global namespace keyed by `supplier_code` / `po_number` / `gr_number`
+(no `instance_id`), supplier/vendor links as denormalised string codes (not
+UUID FKs), and goods-receipt lines stored inline in a `line_items` JSONB
+column (no separate line tables). See the `*.entity.ts` files in
+`entities/` for the authoritative column list.
 
-- assume Roshni's core tables (`invoices`, `users`) already exist for the
-  FKs referenced from `goods_receipts` and `audit_logs`,
-- use `snake_case` columns consistent with `SnakeNamingStrategy` in
-  `app.module.ts` (entity property `supplierCode` maps to column
-  `supplier_code` automatically — do **not** add explicit `name:`
-  overrides on entities unless you also update the migration),
-- are pending Roshni's review before merge into the canonical migration
-  stream.
+The schema itself is owned externally:
+
+- In **dev**, TypeORM `synchronize` (gated on `NODE_ENV !== 'production'` in
+  `app.module.ts`) auto-creates the tables from the entities so the local
+  Docker stack and `npm run seed` work with no manual DDL.
+- In **prod**, Roshni's canonical migration owns the schema; `synchronize`
+  is off and the entities here must match her column names.
+- Column naming relies on `SnakeNamingStrategy` in `app.module.ts` (entity
+  property `supplierCode` maps to column `supplier_code` automatically — do
+  **not** add explicit `name:` overrides on entities unless the canonical
+  schema disagrees).
 
 ## Pending from Roshni
 
@@ -155,10 +162,6 @@ V1–V5 SQL migrations for the tables this module owns
   for Roshni's authoritative entity when ready — the field names already
   match her spec (`actionType`, `invoiceId`, `oldValue` / `newValue` jsonb,
   `notes`).
-- **V1–V5 review + merge** into the canonical migration stream.
-- **Decision on migration tooling**: keep raw SQL files (current shape)
-  vs. promote to TypeORM `MigrationInterface` classes so they ship via
-  `typeorm migration:run`.
 - **`CfdiParserService.readFromBlob(...)` real Azure Blob client** —
   currently returns a hardcoded sample CFDI XML so the rest of the
   validation pipeline can be exercised end-to-end.
@@ -187,8 +190,14 @@ V1–V5 SQL migrations for the tables this module owns
   `CfdiValidationService.validateInvoice(invoiceId, blobPath)` can be
   invoked by the upstream invoice intake pipeline.
 - **Real Canadian Epicor data + onboarding.** All 10 Canada instances
-  return empty arrays today (`Canada region not yet wired` log line in
-  the sync services).
+  (`instanceId` 35–44) are now wired through `MockEpicorService` against
+  realistic CAD fixtures — suppliers/POs sync and the goods-receipts read
+  API all route region `CANADA` through the US English normaliser (Canada
+  Epicor ships the same `Vendor` / `POHeader` / `ReceiptHdr` field names),
+  tagging receipts `rawSource: 'CANADA'`. Still pending from Martinrea: real
+  per-plant credentials + VPN, and confirmation of the actual Canadian export
+  format/connection type (SFTP CSV vs ODBC) so the mock can be swapped for a
+  live adapter.
 
 ## Local setup
 
@@ -203,7 +212,7 @@ npm install
 npm run start:dev
 
 # 4. Run the test suite
-npm test    # 44 tests across 7 suites
+npm test    # 50 tests across 7 suites
 ```
 
 If Docker isn't available, the equivalent Homebrew path is:

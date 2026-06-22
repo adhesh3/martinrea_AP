@@ -1,3 +1,4 @@
+import { CANADA_SUPPLIERS } from './data/canada-suppliers.mock';
 import { MEXICO_SUPPLIERS } from './data/mexico-suppliers.mock';
 import { US_SUPPLIERS } from './data/us-suppliers.mock';
 import {
@@ -73,5 +74,34 @@ describe('MockEpicorService', () => {
     } finally {
       randomSpy.mockRestore();
     }
+  });
+
+  it('7. getCanadaSuppliers filters InActive === true', () => {
+    // Sanity check: the fixture must contain at least one inactive row,
+    // otherwise the filter would not actually be exercised.
+    expect(CANADA_SUPPLIERS.some((s) => s.InActive)).toBe(true);
+
+    const result = service.getCanadaSuppliers(35);
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.every((s) => s.InActive === false)).toBe(true);
+    // Canada Epicor ships CAD on the English Vendor shape.
+    expect(result.every((s) => s.CurrencyCode === 'CAD')).toBe(true);
+    expect(result.every((s) => s.Country === 'CA')).toBe(true);
+  });
+
+  it('8. getCanadaOpenPOs returns only OpenOrder === true', () => {
+    const result = service.getCanadaOpenPOs(35);
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.every((p) => p.OpenOrder === true)).toBe(true);
+  });
+
+  it('9. getCanadaGoodsReceipts matches a known PO and returns [] for unknown', async () => {
+    const known = await service.getCanadaGoodsReceipts('PO-CA-2024-00310', 35);
+    expect(known.length).toBeGreaterThan(0);
+    expect(known.every((r) => r.PONum === 'PO-CA-2024-00310')).toBe(true);
+    expect(known.every((r) => r.instanceId === 35)).toBe(true);
+
+    const unknown = await service.getCanadaGoodsReceipts('PO-NOPE', 35);
+    expect(unknown).toEqual([]);
   });
 });

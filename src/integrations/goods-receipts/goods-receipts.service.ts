@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 import {
+  CanadaGoodsReceiptWire,
   MexicoGoodsReceiptWire,
   MockEpicorService,
   USGoodsReceiptWire,
@@ -131,24 +132,42 @@ export class GoodsReceiptsService {
           this.assembleMexicoReceipt(row, instance.instanceId),
         );
       }
+      if (source === 'CANADA') {
+        const rows = await this.mockEpicor.getCanadaGoodsReceipts(
+          poNumber,
+          instance.instanceId,
+        );
+        return rows.map((row) =>
+          this.assembleEnglishReceipt(row, instance.instanceId, 'CANADA'),
+        );
+      }
       const rows = await this.mockEpicor.getUSGoodsReceipts(
         poNumber,
         instance.instanceId,
       );
       return rows.map((row) =>
-        this.assembleUSReceipt(row, instance.instanceId),
+        this.assembleEnglishReceipt(row, instance.instanceId, 'US'),
       );
     };
 
-    return (await Promise.race([
-      actualFetch(),
-      new Promise<GoodsReceiptDto[]>((_resolve, reject) => {
-        setTimeout(
-          () => reject(new Error(EPICOR_TIMEOUT_ERROR)),
-          FETCH_TIMEOUT_MS,
-        );
-      }),
-    ])) as GoodsReceiptDto[];
+    // Hold the timer handle so we can clear it once the race settles —
+    // otherwise the (unfired) SLA timeout keeps the event loop alive after a
+    // fast fetch wins, which surfaces as a "worker failed to exit" leak in
+    // tests and a dangling timer in production.
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        actualFetch(),
+        new Promise<GoodsReceiptDto[]>((_resolve, reject) => {
+          timeoutHandle = setTimeout(
+            () => reject(new Error(EPICOR_TIMEOUT_ERROR)),
+            FETCH_TIMEOUT_MS,
+          );
+        }),
+      ]);
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+    }
   }
 
   // ── Normalisation ───────────────────────────────────────────────
@@ -234,12 +253,21 @@ export class GoodsReceiptsService {
   // ── Helpers ─────────────────────────────────────────────────────
 
   private regionToSource(instance: EpicorInstance): GoodsReceiptSource {
-    return instance.region === 'MEXICO' ? 'MEXICO' : 'US';
+    if (instance.region === 'MEXICO') return 'MEXICO';
+    if (instance.region === 'CANADA') return 'CANADA';
+    return 'US';
   }
 
-  private assembleUSReceipt(
-    row: USGoodsReceiptWire,
+  /**
+   * Assemble a receipt from the English (US / Canada) Epicor shape. Both
+   * regions stream the identical `ReceiptHdr` / `ReceiptDtl` field names, so
+   * a single assembler handles both — `source` only tags which region the
+   * row actually came from.
+   */
+  private assembleEnglishReceipt(
+    row: USGoodsReceiptWire | CanadaGoodsReceiptWire,
     instanceId: number,
+    source: 'US' | 'CANADA',
   ): GoodsReceiptDto {
     return {
       grId: deterministicUuid(`gr:${instanceId}:${row.ReceiptNum}`),
@@ -248,7 +276,7 @@ export class GoodsReceiptsService {
       lineItems: row.Lines.map((l) => this.normalizeUSFormat(l)),
       receivedDate: new Date(row.ReceiptDate),
       instanceId,
-      rawSource: 'US',
+      rawSource: source,
     };
   }
 

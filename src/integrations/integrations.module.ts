@@ -6,9 +6,7 @@ import { CfdiParserService } from './cfdi/cfdi-parser.service';
 import { CfdiValidationService } from './cfdi/cfdi-validation.service';
 import { SatValidatorService } from './cfdi/sat-validator.service';
 import { AuditLogEntity } from './entities/audit-log.entity';
-import { GoodsReceiptLineEntity } from './entities/goods-receipt-line.entity';
 import { GoodsReceiptEntity } from './entities/goods-receipt.entity';
-import { PurchaseOrderLineEntity } from './entities/purchase-order-line.entity';
 import { PurchaseOrderEntity } from './entities/purchase-order.entity';
 import { SupplierEntity } from './entities/supplier.entity';
 import { SyncRunLogEntity } from './entities/sync-run-log.entity';
@@ -49,9 +47,7 @@ import { SyncController } from './sync/sync.controller';
       SyncRunLogEntity,
       SupplierEntity,
       PurchaseOrderEntity,
-      PurchaseOrderLineEntity,
       GoodsReceiptEntity,
-      GoodsReceiptLineEntity,
       // Placeholder until Roshni ships the canonical `audit_logs` entity.
       // See `entities/audit-log.entity.ts` for the swap procedure.
       AuditLogEntity,

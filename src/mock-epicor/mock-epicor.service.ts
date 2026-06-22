@@ -1,6 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 import {
+  CANADA_GOODS_RECEIPTS,
+  CanadaGoodsReceiptRecord,
+} from './data/canada-goods-receipts.mock';
+import {
+  CANADA_PURCHASE_ORDERS,
+  CanadaPurchaseOrderRecord,
+} from './data/canada-purchase-orders.mock';
+import {
+  CANADA_SUPPLIERS,
+  CanadaSupplierRecord,
+} from './data/canada-suppliers.mock';
+import {
   MEXICO_GOODS_RECEIPTS,
   MexicoGoodsReceiptRecord,
 } from './data/mexico-goods-receipts.mock';
@@ -34,14 +46,22 @@ export const CONNECTION_REFUSED_ERROR = 'CONNECTION_REFUSED';
 /** US supplier as it appears on the wire from US Epicor, with `instanceId` annotated. */
 export type USSupplierWire = USSupplierRecord & { instanceId: number };
 export type MexicoSupplierWire = MexicoSupplierRecord & { instanceId: number };
+/** Canada Epicor ships the same English Vendor shape as the US plants. */
+export type CanadaSupplierWire = CanadaSupplierRecord & { instanceId: number };
 export type USPurchaseOrderWire = USPurchaseOrderRecord & {
   instanceId: number;
 };
 export type MexicoPurchaseOrderWire = MexicoPurchaseOrderRecord & {
   instanceId: number;
 };
+export type CanadaPurchaseOrderWire = CanadaPurchaseOrderRecord & {
+  instanceId: number;
+};
 export type USGoodsReceiptWire = USGoodsReceiptRecord & { instanceId: number };
 export type MexicoGoodsReceiptWire = MexicoGoodsReceiptRecord & {
+  instanceId: number;
+};
+export type CanadaGoodsReceiptWire = CanadaGoodsReceiptRecord & {
   instanceId: number;
 };
 
@@ -115,6 +135,26 @@ export class MockEpicorService {
     return active.map((s) => ({ ...s, instanceId }));
   }
 
+  /**
+   * Active Canada suppliers for a given instance.
+   *
+   * Canada Epicor uses the US English `Vendor` localisation, so the filter
+   * key is `InActive === false` (same as `getUSSuppliers`), not the Spanish
+   * `Activo` flag used for Mexico.
+   */
+  getCanadaSuppliers(
+    instanceId: number,
+    since?: Date | null,
+  ): CanadaSupplierWire[] {
+    const active = CANADA_SUPPLIERS.filter((s) => !s.InActive);
+    if (since) {
+      return active
+        .slice(0, incrementalSliceSize(instanceId))
+        .map((s) => ({ ...s, instanceId }));
+    }
+    return active.map((s) => ({ ...s, instanceId }));
+  }
+
   // ── PURCHASE ORDERS ─────────────────────────────────────────────
 
   /**
@@ -160,6 +200,22 @@ export class MockEpicorService {
     return slice.map((p) => ({ ...p, instanceId }));
   }
 
+  /**
+   * Open Canada POs for a given instance.
+   *
+   * Unlike `getUSOpenPOs`, the PONum is left intact (no instance prefix
+   * rewrite) so the `PO-CA-` numbers line up directly with
+   * `getCanadaGoodsReceipts` for end-to-end demos of the matching workbench.
+   */
+  getCanadaOpenPOs(
+    instanceId: number,
+    since?: Date | null,
+  ): CanadaPurchaseOrderWire[] {
+    const open = CANADA_PURCHASE_ORDERS.filter((p) => p.OpenOrder);
+    const slice = since ? open.slice(0, incrementalSliceSize(instanceId)) : open;
+    return slice.map((p) => ({ ...p, instanceId }));
+  }
+
   // ── GOODS RECEIPTS ──────────────────────────────────────────────
 
   /**
@@ -193,6 +249,19 @@ export class MockEpicorService {
       await sleep(2800);
     }
     return MEXICO_GOODS_RECEIPTS.filter((r) => r.OrdenCompra === poNumber).map(
+      (r) => ({
+        ...r,
+        instanceId,
+      }),
+    );
+  }
+
+  /** Canada goods receipts for a given PO + instance (US English shape). */
+  async getCanadaGoodsReceipts(
+    poNumber: string,
+    instanceId: number,
+  ): Promise<CanadaGoodsReceiptWire[]> {
+    return CANADA_GOODS_RECEIPTS.filter((r) => r.PONum === poNumber).map(
       (r) => ({
         ...r,
         instanceId,

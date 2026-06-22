@@ -28,9 +28,11 @@ export interface GoodsReceiptLineItem {
  * Different regions ship receipts in different shapes (US plants stream
  * structured rows over ODBC; Mexico plants drop CSV / XML files over SFTP),
  * and downstream consumers occasionally need to know which adapter produced
- * the canonical `GoodsReceiptDto`.
+ * the canonical `GoodsReceiptDto`. Canada uses the same English field shape
+ * as the US plants but is tagged distinctly so consumers can tell the two
+ * apart (e.g. for CAD-vs-USD handling downstream).
  */
-export type GoodsReceiptSource = 'US' | 'MEXICO';
+export type GoodsReceiptSource = 'US' | 'MEXICO' | 'CANADA';
 
 /**
  * Canonical Goods Receipt representation used across the integrations module.
@@ -61,6 +63,6 @@ export class GoodsReceiptDto {
   instanceId!: number;
 
   /** Which regional format was the original data in. */
-  @IsIn(['US', 'MEXICO'])
+  @IsIn(['US', 'MEXICO', 'CANADA'])
   rawSource!: GoodsReceiptSource;
 }

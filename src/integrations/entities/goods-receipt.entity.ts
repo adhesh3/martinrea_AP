@@ -1,60 +1,96 @@
-// Canonical schema per Roshni (Data track). Aligned with `dto/goods-receipt.dto.ts`.
+// Canonical schema per the unified Martinrea AP data model (Roshni / DAT-01).
+// Mirrors the shared `goods_receipts` table.
 //
 // Key invariants:
-//   - `(gr_number, instance_id)` is unique.
-//   - `po_id` is the canonical FK to `purchase_orders(id)`. Nullable +
-//     `ON DELETE SET NULL` so a PO purge never cascades into GR loss; the
-//     denormalised `po_number` is retained as an audit breadcrumb.
-//   - No soft-delete column. Receipts are immutable once written — if one is
-//     wrong it gets reversed by a new compensating receipt, not patched.
+//   - `gr_number` is globally unique (no per-instance dimension).
+//   - PO + supplier are linked by denormalised string codes (`po_number`,
+//     `supplier_code` required; `vendor_code` optional), not UUID FKs.
+//   - Receipt lines are stored inline as a JSONB array (`line_items`) rather
+//     than in a child table.
+//   - Soft-delete via `deleted_at` (paranoid).
 
 import {
   Column,
   CreateDateColumn,
+  DeleteDateColumn,
   Entity,
-  Index,
-  JoinColumn,
-  ManyToOne,
   PrimaryGeneratedColumn,
+  Unique,
+  UpdateDateColumn,
 } from 'typeorm';
 
-import { PurchaseOrderEntity } from './purchase-order.entity';
+/** Canonical goods-receipt lifecycle status (stored as text). */
+export type GoodsReceiptStatus =
+  | 'OPEN'
+  | 'PARTIALLY_MATCHED'
+  | 'FULLY_MATCHED'
+  | 'CLOSED';
 
-/**
- * Source format the goods-receipt was originally pulled from. US plants
- * stream structured rows over ODBC; Mexico plants drop CSV / XML over SFTP.
- * Persisted so downstream consumers can trace which adapter produced the row.
- */
-export type GoodsReceiptSource = 'US' | 'MEXICO';
+/** Shape of a single element in the `line_items` JSONB array. */
+export interface GoodsReceiptLineItem {
+  poLineRef: string;
+  partNumber?: string;
+  quantityOrdered: number;
+  quantityReceived: number;
+  unitPrice: number;
+  currency: string;
+}
 
 @Entity('goods_receipts')
-@Index(['instanceId', 'grNumber'], { unique: true })
+@Unique(['grNumber'])
 export class GoodsReceiptEntity {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ type: 'varchar', length: 64 })
+  @Column({ type: 'varchar', length: 60 })
   grNumber!: string;
 
-  /** FK to `purchase_orders(id)`. Null after the parent PO row is hard-deleted. */
-  @Column({ type: 'uuid', nullable: true })
-  poId!: string | null;
-
-  @ManyToOne(() => PurchaseOrderEntity, { onDelete: 'SET NULL', nullable: true })
-  @JoinColumn({ name: 'po_id' })
-  purchaseOrder?: PurchaseOrderEntity | null;
-
-  /** Denormalised PO number — survives even when `po_id` is nulled. */
-  @Column({ type: 'varchar', length: 64 })
+  /** PO number this receipt was booked against. */
+  @Column({ type: 'varchar', length: 60 })
   poNumber!: string;
 
-  @Column({ type: 'int' })
-  instanceId!: number;
+  /** Canonical supplier code (Epicor VendorNum / CodigoProveedor). */
+  @Column({ type: 'varchar', length: 50 })
+  supplierCode!: string;
 
-  /** Which regional adapter produced this row. */
-  @Column({ type: 'varchar', length: 8 })
-  rawSource!: GoodsReceiptSource;
+  /** Optional link to the internal vendor master. */
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  vendorCode!: string | null;
+
+  /** Denormalised supplier name for display in lists / matching UIs. */
+  @Column({ type: 'varchar', length: 255 })
+  supplierName!: string;
+
+  /** Plant / site code that produced the receipt. */
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  plantId!: string | null;
+
+  @Column({ type: 'date' })
+  receivedDate!: Date;
+
+  @Column({ type: 'varchar', length: 24, default: 'OPEN' })
+  status!: GoodsReceiptStatus;
+
+  /** Received line items: see {@link GoodsReceiptLineItem}. */
+  @Column({ type: 'jsonb', nullable: true })
+  lineItems!: GoodsReceiptLineItem[] | null;
+
+  @Column({ type: 'numeric', precision: 14, scale: 2, nullable: true })
+  totalReceivedValue!: string | null;
+
+  /** ISO 4217 currency code. */
+  @Column({ type: 'varchar', length: 3, default: 'USD' })
+  currency!: string;
+
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  notes!: string | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;
+
+  @UpdateDateColumn({ type: 'timestamptz' })
+  updatedAt!: Date;
+
+  @DeleteDateColumn({ type: 'timestamptz', nullable: true })
+  deletedAt!: Date | null;
 }

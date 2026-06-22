@@ -20,7 +20,8 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      # Host 3010 → container 3000 (host 3000 is taken by an SSH tunnel locally).
+      - "3010:3000"
     depends_on:
       postgres:
         condition: service_healthy

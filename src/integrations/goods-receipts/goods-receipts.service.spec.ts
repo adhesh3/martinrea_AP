@@ -1,4 +1,4 @@
-import type { MockEpicorService } from '../../mock-epicor/mock-epicor.service';
+import { MockEpicorService } from '../../mock-epicor/mock-epicor.service';
 import { GoodsReceiptsService } from './goods-receipts.service';
 
 // The pure methods under test never touch MockEpicorService — passing a
@@ -92,6 +92,31 @@ describe('GoodsReceiptsService', () => {
       expect(view.paginatedData).toEqual([5]);
       expect(view.total).toBe(5);
       expect(view.hasMore).toBe(false);
+    });
+  });
+
+  // End-to-end through a real MockEpicorService: instance 35 is a CANADA
+  // plant (per epicor-instances.config.ts), so this exercises regionToSource
+  // → getCanadaGoodsReceipts → assembleEnglishReceipt with the 'CANADA' tag.
+  describe('getGoodsReceipts (Canada end-to-end)', () => {
+    it('7. routes a Canada instance to Canada receipts tagged rawSource:CANADA', async () => {
+      const liveService = new GoodsReceiptsService(new MockEpicorService());
+
+      const { data, total } = await liveService.getGoodsReceipts(
+        'PO-CA-2024-00310',
+        35,
+        1,
+        50,
+      );
+
+      expect(total).toBeGreaterThan(0);
+      expect(data.length).toBe(total);
+      expect(data.every((r) => r.rawSource === 'CANADA')).toBe(true);
+      expect(data.every((r) => r.poNumber === 'PO-CA-2024-00310')).toBe(true);
+      expect(data.every((r) => r.instanceId === 35)).toBe(true);
+      // English-shape normalisation produced canonical line items.
+      expect(data[0].lineItems.length).toBeGreaterThan(0);
+      expect(data[0].lineItems[0]).toHaveProperty('receivedQty');
     });
   });
 });

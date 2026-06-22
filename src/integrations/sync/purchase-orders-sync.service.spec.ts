@@ -1,15 +1,20 @@
-import type { DataSource, EntityManager, Repository } from 'typeorm';
+import type { Repository } from 'typeorm';
 
 import type { MockEpicorService } from '../../mock-epicor/mock-epicor.service';
 import type { EpicorInstance } from '../config/epicor-instances.config';
-import { PurchaseOrderLineEntity } from '../entities/purchase-order-line.entity';
-import { PurchaseOrderEntity } from '../entities/purchase-order.entity';
+import type { PurchaseOrderEntity } from '../entities/purchase-order.entity';
 import { PurchaseOrdersSyncService } from './purchase-orders-sync.service';
 
 const MX_INSTANCE: EpicorInstance = {
   instanceId: 21,
   region: 'MEXICO',
   plantName: 'Test-MX-Plant',
+} as EpicorInstance;
+
+const CA_INSTANCE: EpicorInstance = {
+  instanceId: 35,
+  region: 'CANADA',
+  plantName: 'Test-CA-Plant',
 } as EpicorInstance;
 
 function makeQueryBuilder(rows: Array<{ id: string; created: boolean }> = []) {
@@ -24,39 +29,16 @@ function makeQueryBuilder(rows: Array<{ id: string; created: boolean }> = []) {
 }
 
 /**
- * Build a fake `EntityManager` that records `.createQueryBuilder` and
- * `.delete` calls. The transaction callback in
- * `PurchaseOrdersSyncService.upsertToDatabase` calls these in a fixed order
- * — the tests assert on that ordering.
+ * Fake `PurchaseOrderEntity` repo whose `createQueryBuilder` hands back a
+ * recording builder. The canonical schema stores PO headers only, so
+ * `upsertToDatabase` is a single header upsert — no transaction, no line repo.
  */
-function makeFakeManager(headerRows: Array<{ id: string; created: boolean }>) {
-  const headerBuilder = makeQueryBuilder(headerRows);
-  const lineBuilder = makeQueryBuilder([]);
-  let qbCallIndex = 0;
-  const manager = {
-    createQueryBuilder: jest.fn(() => {
-      // First call inside the transaction is the header upsert, second is
-      // the bulk line insert. Hand out the appropriate builder each time so
-      // tests can assert on both independently.
-      const builder = qbCallIndex === 0 ? headerBuilder : lineBuilder;
-      qbCallIndex += 1;
-      return builder;
-    }),
-    delete: jest.fn(async () => ({ affected: 0 })),
+function makeRepo(rows: Array<{ id: string; created: boolean }> = []) {
+  const builder = makeQueryBuilder(rows);
+  const repo = {
+    createQueryBuilder: jest.fn(() => builder),
   };
-  return { manager, headerBuilder, lineBuilder };
-}
-
-function makeFakeDataSource(headerRows: Array<{ id: string; created: boolean }>) {
-  const fakeMgr = makeFakeManager(headerRows);
-  const dataSource = {
-    transaction: jest.fn(
-      async (cb: (mgr: EntityManager) => Promise<unknown>) => {
-        return cb(fakeMgr.manager as unknown as EntityManager);
-      },
-    ),
-  };
-  return { dataSource: dataSource as unknown as DataSource, fakeMgr };
+  return { repo: repo as unknown as Repository<PurchaseOrderEntity>, builder };
 }
 
 function makeStubMockEpicor(
@@ -66,15 +48,14 @@ function makeStubMockEpicor(
     simulateConnectionDelay: jest.fn(async () => undefined),
     getUSOpenPOs: jest.fn(() => []),
     getMexicoOpenPOs: jest.fn(() => []),
+    getCanadaOpenPOs: jest.fn(() => []),
   };
   return Object.assign(base, overrides) as unknown as MockEpicorService;
 }
 
 describe('PurchaseOrdersSyncService.normalizePurchaseOrder', () => {
   it('8. normalizeMexicoPO maps NumOrden → poNumber, CodigoProveedor → supplierCode, OrdenAbierta→status', async () => {
-    const { dataSource, fakeMgr } = makeFakeDataSource([
-      { id: 'po-uuid-1', created: true },
-    ]);
+    const { repo, builder } = makeRepo([{ id: 'po-uuid-1', created: true }]);
     const mock = makeStubMockEpicor({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       getMexicoOpenPOs: jest.fn((() => [
@@ -99,92 +80,117 @@ describe('PurchaseOrdersSyncService.normalizePurchaseOrder', () => {
         },
       ])) as any,
     });
-    const poRepo = {} as Repository<PurchaseOrderEntity>;
-    const poLineRepo = {} as Repository<PurchaseOrderLineEntity>;
-    const service = new PurchaseOrdersSyncService(
-      mock,
-      poRepo,
-      poLineRepo,
-      dataSource,
-    );
+    const service = new PurchaseOrdersSyncService(mock, repo);
 
     await service.syncForInstance(MX_INSTANCE);
 
     // The header builder received exactly one row with the normalised fields.
-    const headerValues = fakeMgr.headerBuilder.values.mock.calls[0][0] as Array<
+    const headerValues = builder.values.mock.calls[0][0] as Array<
       Record<string, unknown>
     >;
     expect(headerValues).toHaveLength(1);
     expect(headerValues[0].poNumber).toBe('PO-MX-9001');
     expect(headerValues[0].supplierCode).toBe('PROV-2041');
+    expect(headerValues[0].supplierName).toBe('PROV-2041');
+    expect(headerValues[0].vendorCode).toBeNull();
     expect(headerValues[0].status).toBe('OPEN');
     expect(headerValues[0].currency).toBe('MXN');
     expect(headerValues[0].plantId).toBe('MX-MTY-01');
     // NUMERIC columns are serialised to strings before insertion.
     expect(headerValues[0].totalAmount).toBe('15000.00');
   });
+
+  it('8b. normalizeCanadaPO uses the English path (PONum → poNumber, CAD currency, plant)', async () => {
+    const { repo, builder } = makeRepo([{ id: 'po-uuid-ca', created: true }]);
+    const mock = makeStubMockEpicor({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      getCanadaOpenPOs: jest.fn((() => [
+        {
+          PONum: 'PO-CA-2024-00310',
+          VendorNum: 'V-20051',
+          OrderDate: '2024-11-14',
+          NeedByDate: '2024-12-02',
+          OpenOrder: true,
+          BuyerID: 'BUYER-CA1',
+          CurrencyCode: 'CAD',
+          TotalOrderAmt: 70300,
+          Plant: 'VGN-MFG',
+          Lines: [
+            {
+              LineNum: 1,
+              PartNum: 'STL-CL-HR-055',
+              LineDesc: 'Hot Rolled Steel Coil 0.055" Gauge',
+              OrderQty: 28,
+              UOM: 'TON',
+              UnitCost: 1180.0,
+              ExtCost: 33040,
+              OpenLine: true,
+            },
+          ],
+          instanceId: 35,
+        },
+      ])) as any,
+    });
+    const service = new PurchaseOrdersSyncService(mock, repo);
+
+    await service.syncForInstance(CA_INSTANCE);
+
+    expect(mock.getCanadaOpenPOs).toHaveBeenCalledWith(35, null);
+    const headerValues = builder.values.mock.calls[0][0] as Array<
+      Record<string, unknown>
+    >;
+    expect(headerValues).toHaveLength(1);
+    expect(headerValues[0].poNumber).toBe('PO-CA-2024-00310');
+    expect(headerValues[0].supplierCode).toBe('V-20051');
+    expect(headerValues[0].status).toBe('OPEN');
+    expect(headerValues[0].currency).toBe('CAD');
+    expect(headerValues[0].plantId).toBe('VGN-MFG');
+  });
 });
 
 describe('PurchaseOrdersSyncService.upsertToDatabase', () => {
-  it('9. wraps work in dataSource.transaction (single atomic unit)', async () => {
-    const { dataSource, fakeMgr } = makeFakeDataSource([
-      { id: 'po-uuid-1', created: true },
-    ]);
-    const mock = makeStubMockEpicor({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      getMexicoOpenPOs: jest.fn((() => [makeMxPoWire('PO-1')])) as any,
-    });
-    const service = new PurchaseOrdersSyncService(
-      mock,
-      {} as Repository<PurchaseOrderEntity>,
-      {} as Repository<PurchaseOrderLineEntity>,
-      dataSource,
-    );
-
-    await service.syncForInstance(MX_INSTANCE);
-
-    // Single `.transaction(...)` envelope around the entire write. Required
-    // so a partial failure can never leave a PO without its lines.
-    expect(dataSource.transaction).toHaveBeenCalledTimes(1);
-    expect(fakeMgr.headerBuilder.execute).toHaveBeenCalledTimes(1);
-  });
-
-  it('10. lines are deleted then re-inserted (replace-all semantics)', async () => {
-    const { dataSource, fakeMgr } = makeFakeDataSource([
-      { id: 'po-uuid-1', created: false },
-    ]);
+  it('9. performs a single header upsert with conflict on po_number (no line table writes)', async () => {
+    const { repo, builder } = makeRepo([{ id: 'po-uuid-1', created: true }]);
     const mock = makeStubMockEpicor({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       getMexicoOpenPOs: jest.fn((() => [
-        makeMxPoWire('PO-2', [
+        makeMxPoWire('PO-1', [
           { line: 1, qty: '10', cost: '5.00' },
           { line: 2, qty: '20', cost: '7.50' },
         ]),
       ])) as any,
     });
-    const service = new PurchaseOrdersSyncService(
-      mock,
-      {} as Repository<PurchaseOrderEntity>,
-      {} as Repository<PurchaseOrderLineEntity>,
-      dataSource,
-    );
+    const service = new PurchaseOrdersSyncService(mock, repo);
 
     await service.syncForInstance(MX_INSTANCE);
 
-    // 1. Header upsert.
-    expect(fakeMgr.headerBuilder.execute).toHaveBeenCalledTimes(1);
-    // 2. Bulk delete of existing lines for these po_ids.
-    expect(fakeMgr.manager.delete).toHaveBeenCalledTimes(1);
-    const deleteArgs = fakeMgr.manager.delete.mock.calls[0] as unknown[];
-    expect(deleteArgs[0]).toBe(PurchaseOrderLineEntity);
-    // 3. Bulk insert of new lines — same builder, called once after delete.
-    expect(fakeMgr.lineBuilder.execute).toHaveBeenCalledTimes(1);
-    const lineValues = fakeMgr.lineBuilder.values.mock.calls[0][0] as Array<
+    // Exactly one query builder + one execute: headers only, no transaction,
+    // no line delete/insert.
+    expect(repo.createQueryBuilder).toHaveBeenCalledTimes(1);
+    expect(builder.execute).toHaveBeenCalledTimes(1);
+    // Conflict target is the global po_number; update list is the canonical
+    // header column set.
+    expect(builder.orUpdate).toHaveBeenCalledWith(
+      [
+        'supplier_code',
+        'vendor_code',
+        'supplier_name',
+        'plant_id',
+        'currency',
+        'total_amount',
+        'status',
+        'issued_date',
+        'expected_delivery_date',
+        'notes',
+      ],
+      ['po_number'],
+    );
+    // A single header row is written regardless of how many source lines exist.
+    const headerValues = builder.values.mock.calls[0][0] as Array<
       Record<string, unknown>
     >;
-    expect(lineValues).toHaveLength(2);
-    expect(lineValues[0].lineNumber).toBe(1);
-    expect(lineValues[1].lineNumber).toBe(2);
+    expect(headerValues).toHaveLength(1);
+    expect(headerValues[0].poNumber).toBe('PO-1');
   });
 });
 

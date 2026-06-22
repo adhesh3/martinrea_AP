@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import {
+  CanadaSupplierWire,
   MexicoSupplierWire,
   MockEpicorService,
   USSupplierWire,
@@ -18,15 +19,19 @@ export interface SupplierSyncCounts {
   failed: number;
 }
 
-type RawSupplier = USSupplierWire | MexicoSupplierWire;
+type RawSupplier = USSupplierWire | MexicoSupplierWire | CanadaSupplierWire;
+
+/** US and Canada Epicor ship the same English `Vendor` field shape. */
+type EnglishSupplierWire = USSupplierWire | CanadaSupplierWire;
 
 /**
  * Worker for INT-01 (suppliers nightly sync).
  *
  * Pulls active suppliers from a single Epicor instance, normalises them onto
- * `SupplierDto`, and upserts into the `suppliers` table via Postgres
- * `INSERT ... ON CONFLICT (supplier_code, instance_id) DO UPDATE`. Stateless
- * — driven by the orchestrator (`EpicorSyncService`).
+ * `SupplierDto`, and upserts into the canonical `suppliers` table via Postgres
+ * `INSERT ... ON CONFLICT (supplier_code) DO UPDATE`. `supplier_code` is a
+ * single global namespace (no per-instance dimension). Stateless — driven by
+ * the orchestrator (`EpicorSyncService`).
  *
  * Currently sources its data from `MockEpicorService` (no real Epicor
  * credentials yet). To switch to live Epicor, replace the body of
@@ -121,10 +126,13 @@ export class SuppliersSyncService {
     if (instance.region === 'MEXICO') {
       return this.mockEpicor.getMexicoSuppliers(instance.instanceId, since);
     }
-    // Canada is not in scope for v1 — log once and return empty so the
-    // orchestrator records a clean SUCCESS with zero rows for these plants.
+    if (instance.region === 'CANADA') {
+      return this.mockEpicor.getCanadaSuppliers(instance.instanceId, since);
+    }
+    // Defensive fallback for any future region not yet wired — log once and
+    // return empty so the orchestrator records a clean SUCCESS with zero rows.
     this.logger.warn(
-      `Canada region not yet wired (instance=${instance.instanceId}, plant=${instance.plantName}). Returning empty supplier list.`,
+      `Region '${instance.region}' not yet wired (instance=${instance.instanceId}, plant=${instance.plantName}). Returning empty supplier list.`,
     );
     return [];
   }
@@ -132,10 +140,13 @@ export class SuppliersSyncService {
   /**
    * Map a raw Epicor row onto the canonical `SupplierDto`.
    *
-   * US     : VendorNum→supplierCode, Name→supplierName, VendorId→taxId,
-   *          Country→country, CurrencyCode→currencyCode, PayTerms→payTerms,
+   * US/CA  : VendorNum→supplierCode, Name→supplierName, VendorId→taxId,
+   *          Country→country (ISO alpha-2), CurrencyCode→currencyCode,
+   *          PayTerms→payTerms,
    *          Address1/City/State→addressLine1/city/stateProvince,
-   *          InActive===false→ACTIVE.
+   *          InActive===false→ACTIVE. (Canada Epicor uses the same English
+   *          Vendor localisation as the US plants — only the currency 'CAD'
+   *          and country 'CA' differ.)
    * Mexico : CodigoProveedor→supplierCode, NombreProveedor→supplierName,
    *          RFC→taxId, Pais→country (normalised to ISO 'MX'),
    *          Moneda→currencyCode, CondicionesPago→payTerms,
@@ -149,9 +160,10 @@ export class SuppliersSyncService {
     if (instance.region === 'MEXICO') {
       const r = raw as MexicoSupplierWire;
       return {
-        supplierId: deterministicUuid(
-          `mx:${instance.instanceId}:${r.CodigoProveedor}`,
-        ),
+        // Deterministic id is seeded from `supplier_code` only: it is the
+        // single global key, so the same supplier resolves to the same id
+        // regardless of which instance happened to sync it.
+        supplierId: deterministicUuid(r.CodigoProveedor),
         supplierCode: r.CodigoProveedor,
         supplierName: r.NombreProveedor,
         taxId: r.RFC ?? null,
@@ -167,11 +179,10 @@ export class SuppliersSyncService {
       };
     }
 
-    const r = raw as USSupplierWire;
+    const r = raw as EnglishSupplierWire;
     return {
-      supplierId: deterministicUuid(
-        `${instance.region.toLowerCase()}:${instance.instanceId}:${r.VendorNum}`,
-      ),
+      // See note above: id seeded from `supplier_code` (globally unique).
+      supplierId: deterministicUuid(r.VendorNum),
       supplierCode: r.VendorNum,
       supplierName: r.Name,
       taxId: r.VendorId ?? null,
@@ -188,8 +199,13 @@ export class SuppliersSyncService {
   }
 
   /**
-   * Bulk-upsert normalised suppliers via Postgres
-   * `INSERT ... ON CONFLICT (supplier_code, instance_id) DO UPDATE`.
+   * Bulk-upsert normalised suppliers onto the canonical `suppliers` table via
+   * Postgres `INSERT ... ON CONFLICT (supplier_code) DO UPDATE`.
+   *
+   * The internal `SupplierDto` is mapped onto the canonical columns here:
+   *   supplierName → name, currencyCode → currency, country → country_code,
+   *   payTerms ("NET30") → payment_terms_days (30), status → is_active,
+   *   addressLine1 → address. `email`/`phone` aren't sourced from Epicor yet.
    *
    * Inserted vs updated counts are derived from the Postgres `xmax` system
    * column: `xmax = 0` for freshly-inserted rows, non-zero for rows that hit
@@ -206,17 +222,15 @@ export class SuppliersSyncService {
     const values = suppliers.map((s) => ({
       id: s.supplierId,
       supplierCode: s.supplierCode,
-      supplierName: s.supplierName,
+      name: s.supplierName,
       taxId: s.taxId,
-      country: s.country,
-      currencyCode: s.currencyCode,
-      payTerms: s.payTerms,
-      addressLine1: s.addressLine1,
-      city: s.city,
-      stateProvince: s.stateProvince,
-      status: s.status,
-      instanceId: s.instanceId,
-      lastSyncedAt: s.lastSyncedAt,
+      email: null,
+      phone: null,
+      address: s.addressLine1,
+      currency: s.currencyCode,
+      countryCode: s.country,
+      paymentTermsDays: parsePaymentTermsDays(s.payTerms),
+      isActive: s.status === 'ACTIVE',
     }));
 
     const result = await this.supplierRepo
@@ -230,8 +244,18 @@ export class SuppliersSyncService {
       // snake_case columns at the schema layer — but it does NOT rewrite
       // these literal strings, so they must already be in the target naming.
       .orUpdate(
-        ['supplier_name', 'tax_id', 'status', 'last_synced_at'],
-        ['supplier_code', 'instance_id'],
+        [
+          'name',
+          'tax_id',
+          'email',
+          'phone',
+          'address',
+          'currency',
+          'country_code',
+          'payment_terms_days',
+          'is_active',
+        ],
+        ['supplier_code'],
       )
       .returning('"id", (xmax = 0) AS "created"')
       .execute();
@@ -272,6 +296,20 @@ function toIsoCountry(raw: string): string {
   if (normalised === 'UNITED STATES' || normalised === 'USA') return 'US';
   // Already a 2-letter code (US / MX / CA / ...) — keep as-is.
   return normalised.slice(0, 2);
+}
+
+/**
+ * Parse Epicor's free-text payment terms onto the canonical integer day count.
+ * Examples: "NET30" → 30, "Net 45" → 45, "30 DAYS" → 30, "COD" → 0.
+ * Returns `null` when no number can be extracted (caller stores NULL).
+ */
+function parsePaymentTermsDays(payTerms: string | null): number | null {
+  if (!payTerms) return null;
+  const normalised = payTerms.trim().toUpperCase();
+  if (normalised === 'COD' || normalised === 'CASH') return 0;
+  const match = normalised.match(/(\d+)/);
+  if (!match) return null;
+  return Number.parseInt(match[1], 10);
 }
 
 function deterministicUuid(seed: string): string {
