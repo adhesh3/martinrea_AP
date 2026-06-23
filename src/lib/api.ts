@@ -1,5 +1,5 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
-import { STORAGE_KEYS, readJSON, remove } from './storage';
+import { AUTH_COOKIE, STORAGE_KEYS, deleteCookie, getCookie, remove } from './storage';
 import type {
   AllowedTransitionsResponse,
   ApproveResult,
@@ -10,7 +10,7 @@ import type {
 import type { AuthUser, LoginResponse } from '@/types/user';
 
 const BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
+  process.env.NEXT_PUBLIC_API_BASE_URL ??
   'https://bloating-plausibly-ardently.ngrok-free.dev/api';
 
 export const api = axios.create({
@@ -26,7 +26,7 @@ export const api = axios.create({
 
 // ─── Request interceptor: attach JWT ────────────────────────────────────────
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-  const token = readJSON<string | null>(STORAGE_KEYS.authToken, null);
+  const token = getCookie(AUTH_COOKIE);
   if (token) {
     config.headers.set('Authorization', `Bearer ${token}`);
   }
@@ -43,7 +43,7 @@ api.interceptors.response.use(
   (r) => r,
   (error: AxiosError) => {
     if (error.response?.status === 401) {
-      remove(STORAGE_KEYS.authToken);
+      deleteCookie(AUTH_COOKIE);
       remove(STORAGE_KEYS.authUser);
       onUnauthorized?.();
     }
@@ -89,14 +89,13 @@ export const invoicesApi = {
   /**
    * List every invoice. Tolerates either a bare array response or a wrapped
    * envelope ({ data | invoices | items: Invoice[] }) so it works regardless
-   * of how the backend shapes the collection. Requests the backend's maximum
-   * page size (200) so the list pages don't silently cut off at the default 20.
+   * of how the backend shapes the collection.
    */
   list: async (): Promise<Invoice[]> => {
     const { data } = await api.get<
       | Invoice[]
       | { data?: Invoice[]; invoices?: Invoice[]; items?: Invoice[] }
-    >('/invoices', { params: { limit: 200 } });
+    >('/invoices');
     if (Array.isArray(data)) return data;
     return data?.data ?? data?.invoices ?? data?.items ?? [];
   },

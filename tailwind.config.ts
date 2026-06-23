@@ -3,7 +3,7 @@ import animate from 'tailwindcss-animate';
 
 export default {
   darkMode: ['class'],
-  content: ['./index.html', './src/**/*.{ts,tsx}'],
+  content: ['./src/**/*.{ts,tsx}'],
   theme: {
     container: {
       center: true,
@@ -13,6 +13,7 @@ export default {
     extend: {
       fontFamily: {
         sans: [
+          'var(--font-inter)',
           'Inter',
           'ui-sans-serif',
           'system-ui',

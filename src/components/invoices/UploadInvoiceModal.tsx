@@ -1,16 +1,13 @@
 import { useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
   CheckCircle2,
   FileText,
   Loader2,
-  ScanSearch,
   UploadCloud,
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useQueryClient } from '@tanstack/react-query';
 import {
   Dialog,
   DialogContent,
@@ -23,11 +20,9 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
   ACCEPTED_UPLOAD_ACCEPT_ATTR,
+  uploadInvoiceFile,
   validateInvoiceFile,
-} from '@/lib/upload-validation';
-import { extractOcrError, ocrApi } from '@/lib/ocr-api';
-import { ocrKeys, useExtractOcr } from '@/hooks/useOcr';
-import { setPendingExtract } from '@/lib/ocr-extract-store';
+} from '@/lib/object-storage';
 
 type ItemStatus = 'ready' | 'invalid' | 'uploading' | 'done' | 'error';
 
@@ -45,14 +40,9 @@ function prettySize(bytes: number): string {
 }
 
 /**
- * Invoice document intake against the unified workflow+OCR backend.
- *
- * Two paths:
- *  - "Extract & review" (primary, single file): synchronous OCR via
- *    POST /ocr/invoices/extract — nothing is saved until the reviewer commits.
- *  - "Upload" (bulk): POST /ocr/invoices/upload — queued for background OCR
- *    (requires the backend's Redis worker); low-confidence results land in the
- *    review queue.
+ * Uploads invoice documents straight to object storage (Abhay's OCR pipeline
+ * picks them up from the bucket). No field entry here — the extracted data is
+ * reviewed later in the Document Viewer once OCR completes.
  */
 export function UploadInvoiceModal({
   open,
@@ -61,16 +51,12 @@ export function UploadInvoiceModal({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const qc = useQueryClient();
-  const navigate = useNavigate();
-  const extract = useExtractOcr();
   const [items, setItems] = useState<UploadItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const readyItems = items.filter((i) => i.status === 'ready');
-  const readyCount = readyItems.length;
+  const readyCount = items.filter((i) => i.status === 'ready').length;
 
   function addFiles(fileList: FileList | null) {
     if (!fileList) return;
@@ -97,30 +83,9 @@ export function UploadInvoiceModal({
   }
 
   function handleOpenChange(next: boolean) {
-    if (busy || extract.isPending) return;
+    if (busy) return;
     if (!next) reset();
     onOpenChange(next);
-  }
-
-  /**
-   * Primary flow: run synchronous OCR on the single selected document and route
-   * to the review screen (nothing is saved until the reviewer commits).
-   */
-  async function handleExtractReview() {
-    const item = readyItems[0];
-    if (!item) {
-      toast.error('Add a document to extract');
-      return;
-    }
-    try {
-      const result = await extract.mutateAsync(item.file);
-      setPendingExtract({ result, file: item.file });
-      reset();
-      onOpenChange(false);
-      navigate('/ocr/new');
-    } catch {
-      // toast handled in the mutation's onError
-    }
   }
 
   async function handleUpload() {
@@ -137,7 +102,7 @@ export function UploadInvoiceModal({
         prev.map((i) => (i.id === item.id ? { ...i, status: 'uploading', message: undefined } : i)),
       );
       try {
-        await ocrApi.upload(item.file);
+        await uploadInvoiceFile(item.file);
         ok += 1;
         setItems((prev) =>
           prev.map((i) => (i.id === item.id ? { ...i, status: 'done' } : i)),
@@ -147,11 +112,7 @@ export function UploadInvoiceModal({
         setItems((prev) =>
           prev.map((i) =>
             i.id === item.id
-              ? {
-                  ...i,
-                  status: 'error',
-                  message: extractOcrError(err, 'Upload failed'),
-                }
+              ? { ...i, status: 'error', message: err instanceof Error ? err.message : 'Upload failed' }
               : i,
           ),
         );
@@ -160,8 +121,6 @@ export function UploadInvoiceModal({
     setBusy(false);
 
     if (ok > 0) {
-      // New documents land in the OCR pipeline — refresh its queues/stats.
-      qc.invalidateQueries({ queryKey: ocrKeys.all });
       toast.success(
         `${ok} document${ok === 1 ? '' : 's'} uploaded · queued for OCR` +
           (failed > 0 ? ` · ${failed} failed` : ''),
@@ -186,9 +145,8 @@ export function UploadInvoiceModal({
             <div>
               <DialogTitle>Upload invoice</DialogTitle>
               <DialogDescription>
-                Drop a scanned invoice or PDF. "Extract &amp; review" runs OCR now
-                and opens it for verification; "Upload" queues files for
-                background processing.
+                Drop a scanned invoice or PDF. It's sent for OCR, then appears in
+                your queue for review.
               </DialogDescription>
             </div>
           </div>
@@ -276,22 +234,11 @@ export function UploadInvoiceModal({
           </div>
         )}
 
-        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => handleOpenChange(false)}
-            disabled={busy || extract.isPending}
-          >
+        <DialogFooter>
+          <Button type="button" variant="secondary" onClick={() => handleOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={handleUpload}
-            disabled={busy || extract.isPending || readyCount === 0}
-            title="Queue files for background OCR processing"
-          >
+          <Button type="button" onClick={handleUpload} disabled={busy || readyCount === 0}>
             {busy ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -300,29 +247,7 @@ export function UploadInvoiceModal({
             ) : (
               <>
                 <UploadCloud className="h-4 w-4" />
-                Upload{readyCount > 0 ? ` (${readyCount})` : ''}
-              </>
-            )}
-          </Button>
-          <Button
-            type="button"
-            onClick={handleExtractReview}
-            disabled={busy || extract.isPending || readyCount !== 1}
-            title={
-              readyCount > 1
-                ? 'Select a single document to extract and review'
-                : 'Run OCR now and open for review'
-            }
-          >
-            {extract.isPending ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Extracting…
-              </>
-            ) : (
-              <>
-                <ScanSearch className="h-4 w-4" />
-                Extract &amp; review
+                Upload{readyCount > 0 ? ` ${readyCount}` : ''}
               </>
             )}
           </Button>

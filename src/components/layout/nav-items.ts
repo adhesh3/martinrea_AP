@@ -38,40 +38,18 @@ export interface NavSection {
 }
 
 // Convenience groupings, anchored to the backend permission matrix + role profiles.
-const ALL_ROLES: Role[] = ['AP_Clerk', 'Plant_Manager', 'Finance_Director', 'VP_Finance'];
 const APPROVERS: Role[] = ['Plant_Manager', 'Finance_Director', 'VP_Finance'];
 const FINANCE: Role[] = ['Finance_Director', 'VP_Finance'];
 const CAPTURE: Role[] = ['AP_Clerk', 'Finance_Director']; // create/edit-capable roles
-/** Roles that work invoices hands-on (capture + plant-level approval). */
-const OPERATIONS: Role[] = ['AP_Clerk', 'Plant_Manager', 'Finance_Director'];
 
-/**
- * Every tab declares an explicit `roles` allow-list — a person sees ONLY the
- * tabs assigned to their role:
- *
- *   Tab                 AP_Clerk  Plant_Manager  Finance_Director  VP_Finance
- *   Dashboard              ✓           ✓               ✓               ✓
- *   Invoice Processing     ✓           ✓               ✓               ✓
- *   OCR Validation         ✓           —               ✓               —
- *   Document Viewer        ✓           ✓               ✓               —
- *   2/3-Way Match          ✓           —               ✓               —
- *   Approval Workflow      —           ✓               ✓               ✓
- *   Exceptions             ✓           ✓               ✓               —
- *   Payment Packages       ✓           —               ✓               —
- *   Vendor Portal          ✓           —               ✓               —
- *   Repository Search      ✓           ✓               ✓               ✓
- *   Analytics              —           ✓               ✓               ✓
- *   Audit Logs             —           —               ✓               ✓
- *   Admin Panel            —           —               ✓               —
- */
 export const NAV_SECTIONS: NavSection[] = [
   {
     heading: 'Workspace',
     items: [
-      { label: 'Dashboard', to: '/dashboard', icon: LayoutDashboard, available: true, roles: ALL_ROLES },
-      { label: 'Invoice Processing', to: '/invoices', icon: FileText, available: true, roles: ALL_ROLES },
+      { label: 'Dashboard', to: '/dashboard', icon: LayoutDashboard, available: true },
+      { label: 'Invoice Processing', to: '/invoices', icon: FileText, available: true },
       { label: 'OCR Validation', to: '/ocr', icon: ScanLine, available: true, roles: CAPTURE },
-      { label: 'Document Viewer', to: '/documents', icon: FileSearch, available: true, roles: OPERATIONS },
+      { label: 'Document Viewer', to: '/documents', icon: FileSearch, available: true },
     ],
   },
   {
@@ -79,15 +57,15 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: '2-Way / 3-Way Match', to: '/match', icon: GitMerge, available: true, roles: CAPTURE },
       { label: 'Approval Workflow', to: '/approvals', icon: CheckCircle2, available: true, roles: APPROVERS },
-      { label: 'Exceptions', to: '/exceptions', icon: AlertTriangle, available: true, roles: OPERATIONS },
+      { label: 'Exceptions', to: '/exceptions', icon: AlertTriangle, available: true, roles: ['AP_Clerk', 'Plant_Manager', 'Finance_Director'] },
       { label: 'Payment Packages', to: '/payments', icon: CreditCard, available: true, roles: CAPTURE },
     ],
   },
   {
     heading: 'Insight',
     items: [
-      { label: 'Vendor Portal', to: '/vendors', icon: Store, available: true, roles: CAPTURE },
-      { label: 'Repository Search', to: '/search', icon: Search, available: true, roles: ALL_ROLES },
+      { label: 'Vendor Portal', to: '/vendors', icon: Store, available: true },
+      { label: 'Repository Search', to: '/search', icon: Search, available: true },
       { label: 'Analytics', to: '/analytics', icon: BarChart3, available: true, roles: APPROVERS },
       { label: 'Audit Logs', to: '/audit', icon: ScrollText, available: true, roles: FINANCE },
     ],

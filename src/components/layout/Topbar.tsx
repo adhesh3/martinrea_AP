@@ -1,5 +1,7 @@
+'use client';
+
 import { useEffect, useMemo, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { usePathname, useRouter } from 'next/navigation';
 import { ChevronRight, HelpCircle, Keyboard, Mail, Menu, UploadCloud } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -20,7 +22,7 @@ import { RolePill } from '@/components/auth/RolePill';
 import { profileFor } from '@/lib/permissions';
 
 function useBreadcrumb(): string[] {
-  const { pathname } = useLocation();
+  const pathname = usePathname() ?? '';
   return useMemo(() => {
     const trail: string[] = ['Workspace'];
     for (const sec of NAV_SECTIONS) {
@@ -37,7 +39,7 @@ function useBreadcrumb(): string[] {
 
 export function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
   const { user, logout } = useAuth();
-  const navigate = useNavigate();
+  const router = useRouter();
   const trail = useBreadcrumb();
   const [uploadOpen, setUploadOpen] = useState(false);
 
@@ -178,11 +180,11 @@ export function Topbar({ onMenuClick }: { onMenuClick?: () => void }) {
               )}
             </div>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => navigate('/dashboard')}>
+            <DropdownMenuItem onSelect={() => router.push('/dashboard')}>
               Go to Dashboard
             </DropdownMenuItem>
             {canAccessPath('/admin', user?.role) && (
-              <DropdownMenuItem onSelect={() => navigate('/admin')}>
+              <DropdownMenuItem onSelect={() => router.push('/admin')}>
                 Admin Panel
               </DropdownMenuItem>
             )}

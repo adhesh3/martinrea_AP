@@ -1,5 +1,7 @@
+'use client';
+
 import { useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useRouter } from 'next/navigation';
 import {
   AlertTriangle,
   Bell,
@@ -28,7 +30,7 @@ interface Note {
 }
 
 export function NotificationsMenu() {
-  const navigate = useNavigate();
+  const router = useRouter();
   const { invoices } = useInvoicesList();
 
   const notes = useMemo<Note[]>(() => {
@@ -99,7 +101,7 @@ export function NotificationsMenu() {
           notes.map((n) => (
             <DropdownMenuItem
               key={n.to}
-              onSelect={() => navigate(n.to)}
+              onSelect={() => router.push(n.to)}
               className="gap-2.5 py-2.5"
             >
               <span
@@ -113,7 +115,7 @@ export function NotificationsMenu() {
         )}
 
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => navigate('/invoices')} className="justify-center text-[12.5px] font-medium text-brand">
+        <DropdownMenuItem onSelect={() => router.push('/invoices')} className="justify-center text-[12.5px] font-medium text-brand">
           View all invoices
         </DropdownMenuItem>
       </DropdownMenuContent>

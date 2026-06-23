@@ -1,4 +1,7 @@
-import { NavLink } from 'react-router-dom';
+'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { visibleSections } from './nav-items';
@@ -13,6 +16,7 @@ interface SidebarProps {
 
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const { user } = useAuth();
+  const pathname = usePathname() ?? '';
   const profile = profileFor(user?.role);
   const sections = visibleSections(user?.role);
 
@@ -58,33 +62,36 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               {section.heading}
             </h4>
             <ul className="flex flex-col gap-0.5">
-              {section.items.map((item) => (
-                <li key={item.to}>
-                  <NavLink
-                    to={item.to}
-                    onClick={() => onClose?.()}
-                    className={({ isActive }) =>
-                      cn(
+              {section.items.map((item) => {
+                const isActive =
+                  pathname === item.to ||
+                  pathname.startsWith(`${item.to}/`);
+                return (
+                  <li key={item.to}>
+                    <Link
+                      href={item.to}
+                      onClick={() => onClose?.()}
+                      className={cn(
                         'group flex items-center gap-2.5 rounded-md px-3 py-2 text-[13.5px] font-medium transition-colors',
                         'text-slate-200/85 hover:bg-sidebar-hover hover:text-white',
                         isActive &&
                           'bg-brand-400 text-white shadow-sm hover:bg-brand-300 hover:text-white',
-                      )
-                    }
-                  >
-                    <item.icon
-                      className="h-4 w-4 shrink-0 opacity-90"
-                      strokeWidth={1.8}
-                    />
-                    <span className="truncate">{item.label}</span>
-                    {!item.available && (
-                      <span className="ml-auto rounded-sm bg-white/5 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide text-sidebar-muted">
-                        soon
-                      </span>
-                    )}
-                  </NavLink>
-                </li>
-              ))}
+                      )}
+                    >
+                      <item.icon
+                        className="h-4 w-4 shrink-0 opacity-90"
+                        strokeWidth={1.8}
+                      />
+                      <span className="truncate">{item.label}</span>
+                      {!item.available && (
+                        <span className="ml-auto rounded-sm bg-white/5 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide text-sidebar-muted">
+                          soon
+                        </span>
+                      )}
+                    </Link>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         ))}

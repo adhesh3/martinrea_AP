@@ -94,30 +94,3 @@ export function useFlagException() {
     onError: (err) => toast.error(extractApiError(err, 'Flag failed')),
   });
 }
-
-/**
- * Generic state transition (POST /invoices/:id/transitions). Backend-gated to
- * Finance_Director; used by the Exceptions workbench to resolve exceptions
- * (EXCEPTION -> PENDING_MATCH | REJECTED per the state machine).
- */
-export function useForceTransition() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      id,
-      to,
-      notes,
-    }: {
-      id: string;
-      to: Invoice['status'];
-      notes?: string;
-    }) => invoicesApi.transition(id, to, notes),
-    onSuccess: (invoice) => {
-      qc.setQueryData(queryKeys.invoice(invoice.id), invoice);
-      refreshInvoice(qc, invoice.id);
-      qc.invalidateQueries({ queryKey: ['invoices'] });
-      toast.success(`Moved to ${invoice.status.replace(/_/g, ' ').toLowerCase()}`);
-    },
-    onError: (err) => toast.error(extractApiError(err, 'Transition failed')),
-  });
-}

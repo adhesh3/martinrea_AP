@@ -1,178 +1,221 @@
-# Martinrea — Frontend (Phase 1, Vertical Slice)
+# Martinrea — AP Automation Frontend
 
-Production-grade React SPA for the **Martinrea — Accounts Payable Automation Suite**.
-Connects to the existing NestJS backend at `http://localhost:3001/api`.
+Production-grade **Next.js 16** application for the **Martinrea Accounts Payable Automation Suite**.  
+Connects to a NestJS backend and supports the full invoice lifecycle: capture → OCR → review → 3-way match → approval → payment.
 
-This is the **vertical slice** delivery: complete polished Login → Dashboard → Invoice Processing flow with the full app shell, design system, data layer, and seed mechanism in place. Remaining sidebar pages (OCR Validation, Approval Workflow, Exceptions, Audit Logs, Admin, etc.) render a polished "Coming Soon" placeholder so the navigation is intact — they'll be implemented in subsequent passes.
-
----
-
-## Tech stack
-
-- **React 18 + TypeScript** (Vite 5)
-- **React Router v6** — client-side SPA routing
-- **TanStack Query v5** — every fetch and mutation
-- **Axios** — single instance with JWT request interceptor + global 401 handler
-- **Tailwind CSS** — utility-first, with Martinrea brand tokens
-- **shadcn/ui-style primitives** — locally vendored (Button, Card, Input, Label, Dialog, Dropdown, Select, Tabs, Badge, Skeleton, Separator, Textarea, Tooltip, Toaster)
-- **Recharts** — pipeline bar chart on the dashboard
-- **React Hook Form + Zod** — every form (login, create invoice, reject reason)
-- **date-fns** — date formatting
-- **Lucide React** — icons
-- **sonner** — toast notifications
+> **Docs:** For full technical documentation and PRD details, see [`docs/`](./docs/).
+>
+> - [`docs/project-documentation.md`](./docs/project-documentation.md) — Comprehensive project documentation
+> - [`docs/frontend-prd-dhwaj-yash.md`](./docs/frontend-prd-dhwaj-yash.md) — Combined frontend PRD (Track A + B)
 
 ---
 
-## Run locally
+## Tech Stack
 
-### 0. Prerequisites
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 16 (App Router), React 19, TypeScript |
+| Routing | Next.js App Router — `src/app/` (thin shells) + `src/views/` (implementations) |
+| Data Fetching | TanStack React Query v5 + Axios |
+| Forms | React Hook Form + Zod + `@hookform/resolvers` |
+| Styling | Tailwind CSS (custom Martinrea brand tokens) |
+| UI Primitives | shadcn-style locally-vendored components in `src/components/ui/` |
+| Charts | Recharts (dashboard pipeline bar chart) |
+| Icons | Lucide React |
+| Toasts | Sonner |
+| Utilities | date-fns, clsx, tailwind-merge, class-variance-authority |
+| Uploads | OCI Object Storage via Pre-Authenticated Request (PAR) URL |
+| CI/CD | GitHub Actions → Vercel |
 
-- Node.js 20+ (this repo was developed on 22.x)
-- The NestJS backend running on `http://localhost:3001` with `npm run seed` already executed so the three demo users exist
+---
 
-### 1. Install
+## Getting Started
+
+### Prerequisites
+
+- Node.js 20+ (developed on 22.x)
+- NestJS backend running (see backend repo)
+
+### 1. Install dependencies
 
 ```bash
-cd frontend
 npm install
 ```
 
-### 2. Configure
+### 2. Configure environment
 
-A default `.env` is committed for local dev:
-
-```env
-VITE_API_BASE_URL=http://localhost:3001/api
+```bash
+cp .env.example .env
 ```
 
-Override it for staging / production.
+Edit `.env`:
 
-### 3. Run
+```env
+# Backend API base URL (required)
+NEXT_PUBLIC_API_BASE_URL=http://localhost:3001/api
+
+# OCI Object Storage PAR URL for file uploads (optional)
+NEXT_PUBLIC_OCI_PAR_URL=https://objectstorage.region.oraclecloud.com/p/...
+
+# Server-side proxy target (optional, for same-origin deployments)
+API_PROXY_TARGET=http://localhost:3001
+```
+
+### 3. Run the development server
 
 ```bash
 npm run dev
 ```
 
-Open `http://localhost:5173`.
+Open [http://localhost:3000](http://localhost:3000).
 
 ### 4. Sign in
 
-Use any of the seeded backend accounts (password is the same for all):
+| Role | Email | Password |
+|------|-------|----------|
+| AP Clerk | `clerk@martinrea.dev` | `Password123!` |
+| Plant Manager | `pm@martinrea.dev` | `Password123!` |
+| Finance Director | `fd@martinrea.dev` | `Password123!` |
 
-| Role             | Email                  | Password       |
-| ---------------- | ---------------------- | -------------- |
-| AP Clerk         | `clerk@martinrea.dev`  | `Password123!` |
-| Plant Manager    | `pm@martinrea.dev`     | `Password123!` |
-| Finance Director | `fd@martinrea.dev`     | `Password123!` |
-
-The login page lists these as one-click demo buttons.
-
-### 5. Seed demo invoices
-
-The backend exposes only `GET /invoices/:id` (no list endpoint). To populate the dashboard and processing pages with realistic data, sign in as **Finance Director** (so all transition endpoints work) and click **"Seed demo invoices"** on the Dashboard empty state. This calls the real backend through the public endpoints — there are no mocks anywhere in the frontend.
-
-The seed creates ~24 invoices and drives each through the lifecycle to land in a varied final state: RECEIVED, PENDING_REVIEW, PENDING_MATCH, PENDING_APPROVAL, APPROVED, REJECTED, and EXCEPTION. Invoice IDs are persisted in `localStorage` so list pages can enumerate them via parallel `GET /invoices/:id` calls (React Query caches each).
-
----
-
-## What's built
-
-### Pages (live)
-
-- **`/login`** — Two-pane sign-in with branded marketing rail, demo-account quick-fill, ⌘K-ready search global
-- **`/dashboard`** — KPI tiles (open / awaiting approval / exceptions / approved value), pipeline bar chart, recent invoices feed, "My approval queue", status legend, empty-state seed prompt
-- **`/invoices`** — Status-chip filters, search by invoice/PO/supplier, plant filter, sortable columns (invoice #, amount, updated), URL-synced state, partial-failure tolerant
-- **`/invoices/:id`** — Header with amount + status + CFDI badge, full action toolbar (Submit for review, Run match & route, Approve, Reject with reason modal, Flag as exception), allowed-transitions hint, lifecycle timeline showing reached/current/future stages with REJECTED/EXCEPTION off-ramps, approval chain with per-step decisions/timestamps/notes, metadata grid
-
-### Pages (placeholder)
-
-`/ocr`, `/documents`, `/match`, `/approvals`, `/exceptions`, `/payments`, `/vendors`, `/search`, `/analytics`, `/audit`, `/admin` all render the polished `ComingSoonPage` so the sidebar is complete.
-
-### Cross-cutting
-
-- **Auth** — JWT stored in `localStorage` (key `martinrea.auth.token`), attached automatically to every Axios call, 401 wipes token + redirects to `/login`, `/users/me` rehydration on page reload
-- **RBAC-aware UI** — Action buttons appear only when the role + status + current-approver match. Backend remains the source of truth for authorisation (e.g. Finance_Director-only generic transitions).
-- **State machine** — Lifecycle timeline, allowed-transitions hint, and action availability all derive from server data, never duplicate the rules
-- **Toasts** — Every mutation surfaces a success or extracted-API-error toast
-- **Keyboard** — ⌘K / Ctrl-K focuses global search · ⌘N / Ctrl-N opens "New Invoice"
-- **Responsive** — Sidebar collapses, search hides on small screens, tables scroll horizontally
-
----
-
-## Project layout
-
-```
-src/
-  main.tsx, App.tsx, index.css       # entry + routes + Tailwind base
-  vite-env.d.ts                      # Vite import.meta.env typing
-  types/                             # Invoice, Role, AuthUser types
-  lib/
-    api.ts                           # axios + interceptors + endpoint wrappers
-    query-client.ts                  # QueryClient + queryKeys
-    utils.ts                         # cn, formatCurrency, dates, initials
-    constants.ts                     # STATUS_META, PIPELINE_ORDER, plants, suppliers
-    storage.ts                       # typed localStorage wrapper
-    invoice-registry.ts              # known-IDs registry (works around missing list endpoint)
-  auth/
-    AuthContext.tsx, useAuth.ts, ProtectedRoute.tsx
-  components/
-    ui/                              # shadcn-style primitives
-    layout/Sidebar.tsx, Topbar.tsx, AppShell.tsx, nav-items.ts
-    invoices/StatusBadge.tsx, CreateInvoiceModal.tsx, EmptyStateSeedHint.tsx
-  hooks/
-    useInvoices.ts                   # useInvoice, useInvoicesList, useAllowedTransitions
-    useInvoiceMutations.ts           # submitReview, submitMatch, approve, reject, flagException, create
-  seeds/
-    seed-demo-invoices.ts            # Admin-triggered demo seeder
-  pages/
-    LoginPage.tsx, DashboardPage.tsx
-    InvoiceProcessingPage.tsx, InvoiceDetailPage.tsx
-    ComingSoonPage.tsx, NotFoundPage.tsx
-```
+The login page has one-click demo account buttons.
 
 ---
 
 ## Scripts
 
 ```bash
-npm run dev       # vite dev server (port 5173)
-npm run build     # type-check + production build to ./dist
-npm run preview   # serve ./dist locally
+npm run dev     # Start Next.js dev server on port 3000
+npm run build   # TypeScript type-check + production build
+npm start       # Serve production build
+npm run lint    # ESLint
 ```
 
 ---
 
-## Architectural notes
+## Project Structure
 
-### Why a client-side invoice registry?
-
-The backend deliberately exposes only `GET /invoices/:id`. There is no list endpoint in Phase 1 scope. Rather than mocking data on the frontend (which would defeat "no mocks"), this build maintains a small `localStorage`-backed registry of every invoice ID the frontend has ever observed — additions happen on:
-
-1. Successful `POST /invoices` (manual create + seed)
-2. Any direct `GET /invoices/:id` (deep-link)
-
-List-style pages then fan-out parallel `GET /invoices/:id` requests via TanStack Query's `useQueries` and benefit from per-ID cache and refetch. Trade-off: a fresh browser profile sees an empty workspace until invoices are seeded — handled by the empty-state UX.
-
-When the backend ships a `GET /invoices` endpoint, swap `useInvoicesList` to call it directly; nothing else has to change.
-
-### Action availability
-
-A button is shown if and only if:
-
-1. The invoice's `status` allows the transition (mirrors backend state machine)
-2. The user's role is permitted (mirrors backend `@Roles()` guards)
-3. For approve/reject: `currentApproverId === user.id` (mirrors backend segregation of duties)
-
-The backend remains the authority — any forbidden call still returns a clean toast via `extractApiError`.
+```
+src/
+├── app/                    # Next.js App Router (thin route shells)
+│   ├── layout.tsx           # Root layout: QueryClient, AuthProvider, Toaster
+│   ├── page.tsx             # Redirect / → /dashboard
+│   ├── providers.tsx        # Client providers
+│   ├── (auth)/login/        # Login route
+│   └── (app)/               # Protected app routes (sidebar + topbar)
+│       ├── layout.tsx        # Auth gate + role check
+│       ├── dashboard/
+│       ├── invoices/[id]/
+│       ├── match/, documents/, ocr/
+│       ├── approvals/, exceptions/, payments/
+│       ├── vendors/, search/, analytics/
+│       ├── audit/, admin/
+│
+├── views/                  # Page implementations (actual logic lives here)
+│   ├── LoginPage.tsx
+│   ├── DashboardPage.tsx
+│   ├── InvoiceProcessingPage.tsx
+│   ├── InvoiceDetailPage.tsx
+│   ├── AuditLogsPage.tsx
+│   └── [other views — mostly ModuleScaffold placeholders]
+│
+├── components/
+│   ├── layout/             # Sidebar, Topbar, GlobalSearch, NotificationsMenu
+│   ├── invoices/           # StatusBadge, CreateInvoiceModal, UploadInvoiceModal
+│   ├── auth/               # RolePill
+│   └── ui/                 # shadcn-style primitives
+│
+├── auth/                   # AuthContext, useAuth hook
+├── hooks/                  # useInvoices, useInvoiceMutations
+├── lib/
+│   ├── api.ts              # Axios client + endpoint wrappers
+│   ├── permissions.ts      # Frontend RBAC matrix
+│   ├── constants.ts        # Status metadata, plants, pipeline order
+│   ├── storage.ts          # localStorage + cookie helpers
+│   ├── object-storage.ts   # OCI upload via PAR URL
+│   ├── invoice-registry.ts # Client-side ID registry (localStorage)
+│   ├── query-client.ts     # TanStack Query config + query keys
+│   └── utils.ts            # cn, formatCurrency, formatDate, initials
+├── types/
+│   ├── invoice.ts          # Invoice, InvoiceStatus, approval types
+│   └── user.ts             # Role, AuthUser, LoginResponse
+└── proxy.ts                # Next.js server-side auth gate
+```
 
 ---
 
-## Roadmap (remaining "core" pages from the original brief)
+## What's Built
 
-- OCR Validation — review extracted fields, fix and approve OCR draft
-- Approval Workflow — global queue across all approvers
-- Exceptions — focused workbench for invoices in `EXCEPTION`
-- Audit Logs — needs backend `GET /audit-logs` endpoint
-- Admin Panel — needs backend `GET /users`, plus the demo seed button surfaced here
+### Fully Implemented
 
-Deferred from scope: 2/3-Way Match, Document Viewer, Payment Packages, Vendor Portal, Repository Search, Analytics.
+| Page | Route | Description |
+|------|-------|-------------|
+| **Login** | `/login` | JWT auth, demo accounts, Zod-validated form |
+| **Dashboard** | `/dashboard` | KPI tiles, pipeline chart, recent invoices, approval queue |
+| **Invoice List** | `/invoices` | Status chips, search, plant filter, sortable columns, URL-synced filters |
+| **Invoice Detail** | `/invoices/:id` | Full workflow actions, lifecycle timeline, approval chain, metadata |
+| **Audit Logs** | `/audit` | Action log, search/filter (Finance Director only) |
+
+### Partially Implemented
+
+| Page | Route | Status |
+|------|-------|--------|
+| Global Search | ⌘K anywhere | UI complete, no backend search integration |
+| Notifications | Topbar bell | Derived from invoice data, no push notifications |
+
+### Scaffold (ModuleScaffold placeholder)
+
+All sidebar routes exist but render a placeholder: `/ocr`, `/documents`, `/match`, `/approvals`, `/exceptions`, `/payments`, `/vendors`, `/search`, `/analytics`, `/admin`.
+
+**In Progress:**
+- **Dhwaj** (UI/UX Track A): Split-screen Document Viewer (`/documents`) + OCR form
+- **Yash** (UI/UX Track B): 3-Way Match Workbench (`/match`) + exception handling
+
+---
+
+## Authentication
+
+- JWT token stored in a cookie (`mtr_token`) readable by `proxy.ts` server-side gate
+- User profile cached in `localStorage` for instant hydration
+- `proxy.ts` redirects unauthenticated requests to `/login` at the server level
+- Axios interceptor attaches `Authorization: Bearer {token}` on every request
+- 401 response: clears token + redirects to `/login`
+
+## Role-Based Access
+
+| Role | Access Cap | Key Permissions |
+|------|-----------|----------------|
+| `AP_CLERK` | — | Create invoices, submit for review, flag exceptions |
+| `PLANT_MANAGER` | $50,000 | Approve invoices within cap |
+| `FINANCE_DIRECTOR` | Unlimited | Approve all, force transitions, access analytics/admin/audit |
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `⌘K` / `Ctrl+K` | Open global search |
+| `⌘U` / `Ctrl+U` | Open invoice upload modal |
+
+---
+
+## Invoice Lifecycle
+
+```
+RECEIVED → OCR_PROCESSING → PENDING_REVIEW → PENDING_MATCH → MATCHED → PENDING_APPROVAL → APPROVED
+                                                    ↘ EXCEPTION        ↘ REJECTED
+```
+
+All state transitions are enforced by the backend NestJS state machine. The frontend mirrors the rules for UI gating only — the backend remains the source of truth.
+
+---
+
+## Invoice Registry
+
+The frontend maintains a `localStorage`-backed registry of known invoice IDs (`invoice-registry.ts`). This allows list-style pages to enumerate invoices via parallel `GET /invoices/:id` requests when a `GET /invoices` list endpoint is unavailable. When `GET /invoices` is added to the backend, `useInvoicesList` can be updated to call it directly — nothing else needs to change.
+
+---
+
+## Deployment
+
+Deployed automatically via GitHub Actions to **Vercel** on every push to `main` and on every PR (preview deployments).
+
+See `.github/workflows/deploy.yml` for the CI/CD pipeline.

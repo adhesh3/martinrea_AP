@@ -1,3 +1,5 @@
+'use client';
+
 import {
   createContext,
   useCallback,
@@ -6,8 +8,17 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { STORAGE_KEYS, readJSON, remove, writeJSON } from '@/lib/storage';
+import { useRouter } from 'next/navigation';
+import {
+  AUTH_COOKIE,
+  STORAGE_KEYS,
+  deleteCookie,
+  getCookie,
+  readJSON,
+  remove,
+  setCookie,
+  writeJSON,
+} from '@/lib/storage';
 import { authApi, registerUnauthorizedHandler } from '@/lib/api';
 import type { AuthUser } from '@/types/user';
 
@@ -23,39 +34,44 @@ export interface AuthContextValue {
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(() =>
-    readJSON<string | null>(STORAGE_KEYS.authToken, null),
-  );
-  const [user, setUser] = useState<AuthUser | null>(() =>
-    readJSON<AuthUser | null>(STORAGE_KEYS.authUser, null),
-  );
-  const [isInitializing, setIsInitializing] = useState<boolean>(!!token);
+  // Start empty so the server-rendered markup matches the first client render
+  // (no hydration mismatch). Real values are hydrated from the cookie /
+  // localStorage in the mount effect below.
+  const [token, setToken] = useState<string | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [isInitializing, setIsInitializing] = useState<boolean>(true);
 
-  const navigate = useNavigate();
+  const router = useRouter();
 
   const logout = useCallback(() => {
     setToken(null);
     setUser(null);
-    remove(STORAGE_KEYS.authToken);
+    deleteCookie(AUTH_COOKIE);
     remove(STORAGE_KEYS.authUser);
-    navigate('/login', { replace: true });
-  }, [navigate]);
+    router.replace('/login');
+  }, [router]);
 
   // Register global 401 handler so the axios interceptor can boot the user.
   useEffect(() => {
     registerUnauthorizedHandler(() => {
       setToken(null);
       setUser(null);
-      navigate('/login', { replace: true });
+      router.replace('/login');
     });
-  }, [navigate]);
+  }, [router]);
 
-  // Hydrate user on first load if we have a token but no user record.
+  // Hydrate auth state on mount (client only). If a token cookie exists, trust
+  // the cached user for an instant paint, then refresh it from `/users/me`.
   useEffect(() => {
-    if (!token) {
+    const existing = getCookie(AUTH_COOKIE);
+    if (!existing) {
       setIsInitializing(false);
       return;
     }
+    setToken(existing);
+    const cachedUser = readJSON<AuthUser | null>(STORAGE_KEYS.authUser, null);
+    if (cachedUser) setUser(cachedUser);
+
     let cancelled = false;
     authApi
       .me()
@@ -73,8 +89,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-    // run once on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const login = useCallback(
@@ -82,7 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await authApi.login(email, password);
       setToken(res.accessToken);
       setUser(res.user);
-      writeJSON(STORAGE_KEYS.authToken, res.accessToken);
+      setCookie(AUTH_COOKIE, res.accessToken);
       writeJSON(STORAGE_KEYS.authUser, res.user);
       return res.user;
     },

@@ -1,5 +1,7 @@
+'use client';
+
 import { useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useRouter } from 'next/navigation';
 import { CornerDownLeft, Search } from 'lucide-react';
 import { useInvoicesList } from '@/hooks/useInvoices';
 import { StatusBadge } from '@/components/invoices/StatusBadge';
@@ -8,7 +10,7 @@ import { cn, formatCurrency } from '@/lib/utils';
 const MAX_SUGGESTIONS = 6;
 
 export function GlobalSearch() {
-  const navigate = useNavigate();
+  const router = useRouter();
   const { invoices } = useInvoicesList();
   const [q, setQ] = useState('');
   const [focused, setFocused] = useState(false);
@@ -41,13 +43,13 @@ export function GlobalSearch() {
   function openInvoice(id: string) {
     setQ('');
     close();
-    navigate(`/invoices/${id}`);
+    router.push(`/invoices/${id}`);
   }
 
   function searchAll() {
     if (!term) return;
     close();
-    navigate(`/invoices?q=${encodeURIComponent(q.trim())}`);
+    router.push(`/invoices?q=${encodeURIComponent(q.trim())}`);
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {

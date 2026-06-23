@@ -1,5 +1,7 @@
+'use client';
+
 import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -58,7 +60,7 @@ export function CreateInvoiceModal({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const navigate = useNavigate();
+  const router = useRouter();
   const createInvoice = useCreateInvoice();
 
   const {
@@ -107,7 +109,7 @@ export function CreateInvoiceModal({
       .catch(() => null);
     if (created) {
       onOpenChange(false);
-      navigate(`/invoices/${created.id}`);
+      router.push(`/invoices/${created.id}`);
     }
   });
 
